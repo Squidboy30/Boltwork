@@ -138,7 +138,7 @@ def run_checks():
     ok, status, detail = check_402(
         "Summarise upload gate",
         f"{PARSEBIT_L402}/summarise/upload",
-        body=None
+        body='{}'
     )
     results.append({
         "name": "Lightning gate — /summarise/upload",
