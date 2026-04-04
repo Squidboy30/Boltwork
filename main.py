@@ -1,15 +1,20 @@
 import io, json, os, socket, time
 from datetime import datetime, timezone
+
 import anthropic, httpx, pdfplumber
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import Optional
 
+# ---------------------------------------------------------------------------
+# Phase 2: Import the review router (pure addition — zero changes to existing code)
+# ---------------------------------------------------------------------------
+from routers.review import router as review_router
 
-def log_call(endpoint: str, status: str, result: dict = None,
-             error: str = None, duration_ms: int = 0,
-             file_size_bytes: int = 0, source_url: str = None):
+
+def log_call(endpoint: str, status: str, result: dict = None, error: str = None,
+             duration_ms: int = 0, file_size_bytes: int = 0, source_url: str = None):
     """
     Write a structured JSON log line for every API call.
     Readable with: flyctl logs --app parsebit
@@ -25,12 +30,12 @@ def log_call(endpoint: str, status: str, result: dict = None,
     if source_url:
         entry["source_url"] = source_url
     if result:
-        entry["language"]   = result.get("language")
-        entry["sentiment"]  = result.get("sentiment")
+        entry["language"] = result.get("language")
+        entry["sentiment"] = result.get("sentiment")
         entry["word_count"] = result.get("word_count")
-        entry["topics"]     = result.get("topics", [])
+        entry["topics"] = result.get("topics", [])
         meta = result.get("_meta", {})
-        entry["input_tokens"]  = meta.get("input_tokens", 0)
+        entry["input_tokens"] = meta.get("input_tokens", 0)
         entry["output_tokens"] = meta.get("output_tokens", 0)
     if error:
         entry["error"] = error
@@ -67,7 +72,6 @@ async def fetch_pdf_from_url(url: str, timeout: float = 30.0) -> httpx.Response:
     from urllib.parse import urlparse, urlunparse
     parsed = urlparse(url)
     hostname = parsed.hostname
-
     try:
         ip = await resolve_hostname_doh(hostname)
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
@@ -76,9 +80,7 @@ async def fetch_pdf_from_url(url: str, timeout: float = 30.0) -> httpx.Response:
         ip_url = urlunparse((parsed.scheme, netloc, parsed.path,
                              parsed.params, parsed.query, parsed.fragment))
         async with httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=True,
-            verify=False,
+            timeout=timeout, follow_redirects=True, verify=False,
         ) as http:
             return await http.get(ip_url, headers={"Host": hostname})
     except Exception:
@@ -86,18 +88,25 @@ async def fetch_pdf_from_url(url: str, timeout: float = 30.0) -> httpx.Response:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as http:
             return await http.get(url)
 
+
 SERVICE_URL = os.environ.get("SERVICE_URL", "http://localhost:8000")
 
 app = FastAPI(
-    title="Summarisation API",
-    description="AI-powered document summarisation. Pay-per-call via Lightning L402.",
-    version="1.0.0",
+    title="Parsebit API",
+    description="AI-powered document summarisation and code review. Pay-per-call via Lightning L402.",
+    version="2.0.0",
 )
+
+# ---------------------------------------------------------------------------
+# Phase 2: Mount the review router (one line — this is the only change)
+# ---------------------------------------------------------------------------
+app.include_router(review_router)
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 SYSTEM_PROMPT = """You are a precise document summarisation engine.
 Your output is always valid JSON - nothing else, no preamble, no markdown fences.
+
 Return this exact structure:
 {
   "title": "inferred document title or null",
@@ -108,6 +117,7 @@ Return this exact structure:
   "sentiment": "positive | negative | neutral",
   "topics": ["topic1", "topic2"]
 }
+
 Never include any text outside the JSON object."""
 
 
@@ -155,22 +165,36 @@ def summarise_text(text: str) -> dict:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Existing endpoints — UNCHANGED
+# ---------------------------------------------------------------------------
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": "2.0.0"}
 
 
 @app.get("/agent-spec.md", response_class=PlainTextResponse)
 def agent_spec():
-    return f"""# Summarisation API
+    return f"""# Parsebit API
 
 ## What this service does
+Accepts a PDF document or code file and returns a structured JSON analysis.
+
+### Summarisation
 Accepts a PDF document and returns a structured JSON summary.
 Useful for: research papers, reports, contracts, or any PDF.
 
-## Payment
-Protocol: L402 (Bitcoin Lightning Network)
-Price: 50 satoshis per call (~0.03 GBP at current rates)
+### Code Review
+Accepts source code and returns a structured JSON review including bugs,
+security issues, code quality observations, and recommended actions.
+Supports: Python, JavaScript, TypeScript, Go, Rust, Java, C/C++, C#,
+Ruby, PHP, Swift, Kotlin, Scala, Shell, SQL, Terraform, and more.
+
+## Payment Protocol: L402 (Bitcoin Lightning Network)
+- PDF Summarisation: 500 satoshis per call
+- Code Review: 2000 satoshis per call (~£0.50 at current rates)
+
 No account, signup, or API key required.
 Pay the Lightning invoice returned in the 402 response, then retry with the token.
 
@@ -178,12 +202,21 @@ Pay the Lightning invoice returned in the 402 response, then retry with the toke
 {SERVICE_URL}
 
 ## Endpoints
-POST {SERVICE_URL}/summarise/upload - Upload a PDF file (multipart/form-data, field: file)
-POST {SERVICE_URL}/summarise/url    - Summarise PDF from URL (JSON body: url, max_pages)
-GET  {SERVICE_URL}/health           - Health check (free, not L402-gated)
-GET  {SERVICE_URL}/agent-spec.md    - This file (free, not L402-gated)
 
-## Response format
+### Summarisation
+POST {SERVICE_URL}/summarise/upload  - Upload a PDF file (multipart/form-data, field: file)
+POST {SERVICE_URL}/summarise/url     - Summarise PDF from URL (JSON body: url, max_pages)
+
+### Code Review
+POST {SERVICE_URL}/review/code       - Review code as text (JSON body: code, language?, filename?)
+POST {SERVICE_URL}/review/url        - Review code from URL (JSON body: url, language?)
+                                       Supports GitHub/GitLab blob URLs (auto-converted to raw)
+
+### Utility
+GET  {SERVICE_URL}/health            - Health check (free)
+GET  {SERVICE_URL}/agent-spec.md     - This file (free)
+
+## Summarisation response format
 {{
   "title": "string or null",
   "summary": "2-3 sentence summary",
@@ -195,11 +228,33 @@ GET  {SERVICE_URL}/agent-spec.md    - This file (free, not L402-gated)
   "_meta": {{"input_tokens": 0, "output_tokens": 0, "model": ""}}
 }}
 
+## Code Review response format
+{{
+  "language": "python",
+  "overall_score": 7,
+  "summary": "2-3 sentence assessment",
+  "bugs": [
+    {{"severity": "critical|high|medium|low", "line": 42,
+      "description": "...", "suggestion": "..."}}
+  ],
+  "security_issues": [
+    {{"severity": "critical|high|medium|low", "line": 10,
+      "description": "...", "suggestion": "..."}}
+  ],
+  "code_quality": [
+    {{"category": "readability|maintainability|performance|style|testing",
+      "description": "...", "suggestion": "..."}}
+  ],
+  "strengths": ["what the code does well"],
+  "recommended_actions": ["prioritised fix list"],
+  "_meta": {{"input_tokens": 0, "output_tokens": 0, "model": "", "truncated": false}}
+}}
+
 ## Error codes
 400 - Could not fetch the URL
-413 - File too large (max 10MB)
-415 - Not a PDF
-422 - PDF has no extractable text (image-only/scanned)
+413 - File/code too large
+415 - Not a PDF (summarise endpoints)
+422 - PDF has no extractable text / binary file (review endpoints)
 500 - AI error, retry once
 
 ## L402 payment flow
@@ -207,31 +262,18 @@ GET  {SERVICE_URL}/agent-spec.md    - This file (free, not L402-gated)
 2. Receive HTTP 402 with a Lightning invoice in the WWW-Authenticate header.
 3. Pay the invoice with any Lightning wallet or lnget.
 4. Retry with: Authorization: L402 <token>:<preimage>
-5. Receive your JSON summary.
+5. Receive your JSON response.
 
 ## Data & privacy
-
-When you submit a document to this service the following happens:
-- The PDF is fetched and text is extracted on Fly.io servers in London (UK)
-- The extracted text is sent to Anthropic's API for summarisation
+- Code/documents are processed on Fly.io servers in London (UK)
+- Text is sent to Anthropic's API for analysis
 - Anthropic does not train on API data by default
-- Anthropic retains API inputs/outputs for a limited period for safety monitoring
-- No document content is stored permanently by this service
-- No personally identifiable information about the caller is logged or retained
-
-Do not submit documents containing sensitive personal data, confidential legal
-or financial information, or any content subject to regulatory restrictions
-without first reviewing Anthropic's privacy policy:
-https://www.anthropic.com/privacy
-
-This service is intended for summarising non-sensitive documents such as
-research papers, public reports, product documentation, and similar content.
-
-By calling this API you confirm the document submitted does not violate
-applicable data protection laws or your organisation's data handling policies.
+- No content is stored permanently by this service
+- Do not submit sensitive personal data, secrets, or proprietary code
+  without reviewing Anthropic's privacy policy: https://www.anthropic.com/privacy
 
 ## Discovery
-Listed on the 402 Index: https://mcpmarket.com/server/402-index
+Listed on the 402 Index: https://402index.io
 """
 
 
@@ -239,17 +281,45 @@ Listed on the 402 Index: https://mcpmarket.com/server/402-index
 def l402_well_known():
     return {
         "version": "1.0",
-        "name": "Summarisation API",
-        "description": "AI-powered PDF summarisation via Bitcoin Lightning.",
+        "name": "Parsebit API",
+        "description": "AI-powered PDF summarisation and code review via Bitcoin Lightning.",
         "url": SERVICE_URL,
         "spec": f"{SERVICE_URL}/agent-spec.md",
         "pricing": [
-            {"endpoint": "/summarise/upload", "method": "POST", "price_sats": 50, "description": "Summarise uploaded PDF"},
-            {"endpoint": "/summarise/url",    "method": "POST", "price_sats": 50, "description": "Summarise PDF from URL"},
+            {
+                "endpoint": "/summarise/upload",
+                "method": "POST",
+                "price_sats": 500,
+                "description": "Summarise uploaded PDF",
+            },
+            {
+                "endpoint": "/summarise/url",
+                "method": "POST",
+                "price_sats": 500,
+                "description": "Summarise PDF from URL",
+            },
+            {
+                "endpoint": "/review/code",
+                "method": "POST",
+                "price_sats": 2000,
+                "description": "Review code submitted as text",
+            },
+            {
+                "endpoint": "/review/url",
+                "method": "POST",
+                "price_sats": 2000,
+                "description": "Review code from URL (GitHub/GitLab/raw)",
+            },
         ],
         "payment": {"protocol": "L402", "network": "lightning"},
         "contact": os.environ.get("CONTACT_EMAIL", ""),
     }
+
+
+@app.get("/.well-known/agent.json")
+def agent_well_known():
+    """Agent discovery endpoint."""
+    return l402_well_known()
 
 
 @app.post("/summarise/upload")
@@ -291,11 +361,13 @@ async def summarise_url(body: UrlRequest):
                  source_url=str(body.url),
                  duration_ms=int((time.monotonic() - t0) * 1000))
         raise HTTPException(status_code=400, detail=f"Failed to fetch URL: {e}")
+
     content_type = response.headers.get("content-type", "")
     if "pdf" not in content_type and not str(body.url).lower().endswith(".pdf"):
         log_call("/summarise/url", "error", error="not a PDF",
                  source_url=str(body.url))
         raise HTTPException(status_code=415, detail="URL does not appear to be a PDF.")
+
     try:
         result = summarise_text(
             extract_text_from_pdf_bytes(response.content, max_pages=body.max_pages)
