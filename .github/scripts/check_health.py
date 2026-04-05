@@ -1,7 +1,7 @@
 """
-Parsebit Daily Health Monitor
+Boltwork Daily Health Monitor
 ==============================
-Checks all Parsebit services and sends a daily email report.
+Checks all Boltwork services and sends a daily email report.
 Runs via GitHub Actions every morning at 8am UK time.
 """
 
@@ -15,24 +15,17 @@ from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# ---------------------------------------------------------------------------
-# Config — set via GitHub Actions secrets
-# ---------------------------------------------------------------------------
-GMAIL_USER     = os.environ["GMAIL_USER"]       # whitehouseian30@gmail.com
-GMAIL_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]  # Gmail App Password
+GMAIL_USER     = os.environ["GMAIL_USER"]
+GMAIL_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 NOTIFY_EMAIL   = os.environ.get("NOTIFY_EMAIL", GMAIL_USER)
 
-PARSEBIT_API   = "https://parsebit.fly.dev"
-PARSEBIT_L402  = "https://parsebit-lnd.fly.dev"
+BOLTWORK_API  = "https://parsebit.fly.dev"
+BOLTWORK_L402 = "https://parsebit-lnd.fly.dev"
 
-TIMEOUT = 15  # seconds per request
+TIMEOUT = 15
 
-# ---------------------------------------------------------------------------
-# Check helpers
-# ---------------------------------------------------------------------------
 
 def check(label, url, method="GET", body=None, headers=None, expected_status=None):
-    """Run a single HTTP check. Returns (ok, status_code, detail)."""
     try:
         req = urllib.request.Request(url, method=method)
         if headers:
@@ -40,7 +33,6 @@ def check(label, url, method="GET", body=None, headers=None, expected_status=Non
                 req.add_header(k, v)
         if body:
             req.data = body.encode() if isinstance(body, str) else body
-
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             status = r.status
             try:
@@ -50,7 +42,6 @@ def check(label, url, method="GET", body=None, headers=None, expected_status=Non
                 detail = "OK"
             ok = True if expected_status is None else status == expected_status
             return ok, status, detail
-
     except urllib.error.HTTPError as e:
         status = e.code
         try:
@@ -59,13 +50,11 @@ def check(label, url, method="GET", body=None, headers=None, expected_status=Non
             detail = str(e)
         ok = True if expected_status is not None and status == expected_status else False
         return ok, status, detail
-
     except Exception as e:
         return False, 0, str(e)[:200]
 
 
 def check_402(label, url, body):
-    """Check that an endpoint returns a real 402 with a Lightning invoice."""
     ok, status, detail = check(
         label, url, method="POST",
         body=body,
@@ -75,20 +64,12 @@ def check_402(label, url, body):
     return ok, status, "Lightning invoice issued (402 Payment Required)" if ok else detail
 
 
-# ---------------------------------------------------------------------------
-# Run all checks
-# ---------------------------------------------------------------------------
-
 def run_checks():
     now = datetime.now(timezone.utc)
     results = []
 
-    # 1. Parsebit API health
-    ok, status, detail = check(
-        "Parsebit API health",
-        f"{PARSEBIT_API}/health",
-        expected_status=200
-    )
+    # 1. API health
+    ok, status, detail = check("Health", f"{BOLTWORK_API}/health", expected_status=200)
     version = "unknown"
     try:
         data = json.loads(detail)
@@ -96,18 +77,13 @@ def run_checks():
     except Exception:
         pass
     results.append({
-        "name": "Parsebit API",
-        "ok": ok,
-        "status": status,
-        "detail": f"v{version} — {detail[:100]}" if ok else detail
+        "name": "Boltwork API",
+        "ok": ok, "status": status,
+        "detail": f"v{version} — online" if ok else detail
     })
 
-    # 2. L402.json discovery endpoint
-    ok, status, detail = check(
-        "L402 discovery",
-        f"{PARSEBIT_API}/.well-known/l402.json",
-        expected_status=200
-    )
+    # 2. Agent discovery
+    ok, status, detail = check("L402 discovery", f"{BOLTWORK_API}/.well-known/l402.json", expected_status=200)
     endpoint_count = 0
     try:
         data = json.loads(detail)
@@ -116,86 +92,35 @@ def run_checks():
         pass
     results.append({
         "name": "Agent discovery (l402.json)",
-        "ok": ok,
-        "status": status,
+        "ok": ok, "status": status,
         "detail": f"{endpoint_count} endpoints advertised" if ok else detail
     })
 
     # 3. Agent spec
-    ok, status, detail = check(
-        "Agent spec",
-        f"{PARSEBIT_API}/agent-spec.md",
-        expected_status=200
-    )
+    ok, status, detail = check("Agent spec", f"{BOLTWORK_API}/agent-spec.md", expected_status=200)
     results.append({
         "name": "Agent spec (/agent-spec.md)",
-        "ok": ok,
-        "status": status,
+        "ok": ok, "status": status,
         "detail": "Accessible" if ok else detail
     })
 
-    # 4. Summarise/upload — 402 gate
-    ok, status, detail = check_402(
-        "Summarise upload gate",
-        f"{PARSEBIT_L402}/summarise/upload",
-        body='{}'
-    )
-    results.append({
-        "name": "Lightning gate — /summarise/upload",
-        "ok": ok,
-        "status": status,
-        "detail": "Real 402 + invoice returned" if ok else detail
-    })
-
-    # 5. Summarise/url — 402 gate
-    ok, status, detail = check_402(
-        "Summarise URL gate",
-        f"{PARSEBIT_L402}/summarise/url",
-        body='{"url":"https://example.com/test.pdf"}'
-    )
-    results.append({
-        "name": "Lightning gate — /summarise/url",
-        "ok": ok,
-        "status": status,
-        "detail": "Real 402 + invoice returned" if ok else detail
-    })
-
-    # 6. Review/code — 402 gate
-    ok, status, detail = check_402(
-        "Review code gate",
-        f"{PARSEBIT_L402}/review/code",
-        body='{"code":"def hello(): pass"}'
-    )
-    results.append({
-        "name": "Lightning gate — /review/code (2000 sats)",
-        "ok": ok,
-        "status": status,
-        "detail": "Real 402 + invoice returned" if ok else detail
-    })
-
-    # 7. Review/url — 402 gate
-    ok, status, detail = check_402(
-        "Review URL gate",
-        f"{PARSEBIT_L402}/review/url",
-        body='{"url":"https://github.com/Squidboy30/parsebit/blob/main/main.py"}'
-    )
-    results.append({
-        "name": "Lightning gate — /review/url (2000 sats)",
-        "ok": ok,
-        "status": status,
-        "detail": "Real 402 + invoice returned" if ok else detail
-    })
+    # 4–7. Lightning gates
+    gates = [
+        ("Lightning gate — /summarise/upload", f"{BOLTWORK_L402}/summarise/upload", "{}"),
+        ("Lightning gate — /summarise/url", f"{BOLTWORK_L402}/summarise/url", '{"url":"https://example.com/test.pdf"}'),
+        ("Lightning gate — /review/code (2000 sats)", f"{BOLTWORK_L402}/review/code", '{"code":"def hello(): pass"}'),
+        ("Lightning gate — /review/url (2000 sats)", f"{BOLTWORK_L402}/review/url", '{"url":"https://github.com/Squidboy30/parsebit/blob/main/main.py"}'),
+    ]
+    for name, url, body in gates:
+        ok, status, detail = check_402(name, url, body)
+        results.append({"name": name, "ok": ok, "status": status, "detail": detail})
 
     all_ok = all(r["ok"] for r in results)
     return now, results, all_ok
 
 
-# ---------------------------------------------------------------------------
-# Email
-# ---------------------------------------------------------------------------
-
 def build_email(now, results, all_ok):
-    total = len(results)
+    total   = len(results)
     passing = sum(1 for r in results if r["ok"])
     failing = total - passing
 
@@ -203,34 +128,29 @@ def build_email(now, results, all_ok):
     status_text  = "ALL SYSTEMS OPERATIONAL" if all_ok else f"{failing} SERVICE(S) DOWN"
     date_str     = now.strftime("%A %d %B %Y, %H:%M UTC")
 
-    # Plain text version
     lines = [
-        f"Parsebit Daily Health Report",
-        f"{date_str}",
-        f"",
+        "Boltwork Daily Health Report",
+        date_str, "",
         f"Status: {status_text}",
-        f"Checks: {passing}/{total} passing",
-        f"",
-        f"--- Service Checks ---",
+        f"Checks: {passing}/{total} passing", "",
+        "--- Service Checks ---",
     ]
     for r in results:
         icon = "✓" if r["ok"] else "✗"
         lines.append(f"{icon} {r['name']}")
         lines.append(f"  HTTP {r['status']} — {r['detail']}")
         lines.append("")
-
     lines += [
         "--- Links ---",
-        f"API: {PARSEBIT_API}",
-        f"L402 Gateway: {PARSEBIT_L402}",
-        f"GitHub: https://github.com/Squidboy30/parsebit",
-        f"402 Index: https://402index.io",
+        f"API: {BOLTWORK_API}",
+        f"L402 Gateway: {BOLTWORK_L402}",
+        "GitHub: https://github.com/Squidboy30/parsebit",
+        "402 Index: https://402index.io",
         "",
-        "Parsebit by Cracked Minds — crackedminds.co.uk",
+        "Boltwork by Cracked Minds — crackedminds.co.uk",
     ]
     plain = "\n".join(lines)
 
-    # HTML version
     rows = ""
     for r in results:
         colour = "#22c55e" if r["ok"] else "#ef4444"
@@ -246,18 +166,15 @@ def build_email(now, results, all_ok):
           </td>
         </tr>"""
 
-    banner_colour = "#22c55e" if all_ok else "#ef4444"
+    banner = "#22c55e" if all_ok else "#ef4444"
     html = f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
+<html><head><meta charset="utf-8"></head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f9f9f9;margin:0;padding:20px">
   <div style="max-width:640px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08)">
-
-    <div style="background:{banner_colour};padding:24px 32px">
-      <div style="color:#fff;font-size:22px;font-weight:700">{status_emoji} Parsebit Health Report</div>
+    <div style="background:{banner};padding:24px 32px">
+      <div style="color:#fff;font-size:22px;font-weight:700">{status_emoji} Boltwork Health Report</div>
       <div style="color:rgba(255,255,255,0.85);font-size:14px;margin-top:4px">{date_str}</div>
     </div>
-
     <div style="padding:24px 32px">
       <div style="display:flex;gap:24px;margin-bottom:24px">
         <div style="text-align:center;flex:1;background:#f9f9f9;border-radius:8px;padding:16px">
@@ -273,28 +190,23 @@ def build_email(now, results, all_ok):
           <div style="font-size:12px;color:#888;margin-top:4px">TOTAL CHECKS</div>
         </div>
       </div>
-
       <table style="width:100%;border-collapse:collapse">
-        <thead>
-          <tr style="background:#f9f9f9">
-            <th style="padding:10px 12px;text-align:left;font-size:12px;color:#888;font-weight:500;text-transform:uppercase"></th>
-            <th style="padding:10px 12px;text-align:left;font-size:12px;color:#888;font-weight:500;text-transform:uppercase">Service</th>
-            <th style="padding:10px 12px;text-align:left;font-size:12px;color:#888;font-weight:500;text-transform:uppercase">Detail</th>
-          </tr>
-        </thead>
+        <thead><tr style="background:#f9f9f9">
+          <th style="padding:10px 12px;text-align:left;font-size:12px;color:#888;font-weight:500"></th>
+          <th style="padding:10px 12px;text-align:left;font-size:12px;color:#888;font-weight:500;text-transform:uppercase">Service</th>
+          <th style="padding:10px 12px;text-align:left;font-size:12px;color:#888;font-weight:500;text-transform:uppercase">Detail</th>
+        </tr></thead>
         <tbody>{rows}</tbody>
       </table>
-
       <div style="margin-top:24px;padding-top:16px;border-top:1px solid #f0f0f0;font-size:12px;color:#aaa">
-        <a href="{PARSEBIT_API}" style="color:#666;text-decoration:none">parsebit.fly.dev</a> &nbsp;·&nbsp;
+        <a href="{BOLTWORK_API}" style="color:#666;text-decoration:none">Boltwork API</a> &nbsp;·&nbsp;
         <a href="https://github.com/Squidboy30/parsebit" style="color:#666;text-decoration:none">GitHub</a> &nbsp;·&nbsp;
         <a href="https://402index.io" style="color:#666;text-decoration:none">402 Index</a> &nbsp;·&nbsp;
         <a href="https://crackedminds.co.uk" style="color:#666;text-decoration:none">Cracked Minds</a>
       </div>
     </div>
   </div>
-</body>
-</html>"""
+</body></html>"""
 
     return plain, html, status_text
 
@@ -306,31 +218,20 @@ def send_email(plain, html, subject):
     msg["To"]      = NOTIFY_EMAIL
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(html,  "html"))
-
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_PASSWORD)
         server.sendmail(GMAIL_USER, NOTIFY_EMAIL, msg.as_string())
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
-    print("Running Parsebit health checks...")
+    print("Running Boltwork health checks...")
     now, results, all_ok = run_checks()
-
     for r in results:
         icon = "✓" if r["ok"] else "✗"
         print(f"  {icon} {r['name']}: HTTP {r['status']} — {r['detail'][:80]}")
-
     plain, html, status_text = build_email(now, results, all_ok)
-    subject = f"{'✅' if all_ok else '🚨'} Parsebit — {status_text} — {now.strftime('%d %b %Y')}"
-
-    print(f"\nSending email: {subject}")
+    subject = f"{'✅' if all_ok else '🚨'} Boltwork — {status_text} — {now.strftime('%d %b %Y')}"
+    print(f"\nSending: {subject}")
     send_email(plain, html, subject)
-    print("Email sent successfully.")
-
-    # Exit with error code if any check failed (useful for CI)
+    print("Email sent.")
     sys.exit(0 if all_ok else 1)
-

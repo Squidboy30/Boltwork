@@ -1,10 +1,8 @@
-# Parsebit
+# Boltwork
 
-AI-powered PDF summarisation API. Send a PDF, get structured JSON back. Pay-per-call via Bitcoin Lightning L402.
+**Autonomous agent-native AI services via Bitcoin Lightning.**
 
-## What it does
-
-Parsebit accepts a PDF document (by file upload or URL) and returns a structured JSON summary including title, key points, topics, sentiment, and word count. Powered by Claude Sonnet.
+Boltwork is a pay-per-call API built for AI agents. Agents discover the service, pay a Lightning invoice, and get results back — no accounts, no API keys, no subscriptions. Fully autonomous machine-to-machine.
 
 ## Live API
 
@@ -12,15 +10,35 @@ Parsebit accepts a PDF document (by file upload or URL) and returns a structured
 https://parsebit.fly.dev
 ```
 
+## Services
+
+| Service | Endpoint | Price |
+|---------|----------|-------|
+| PDF Summarisation | `POST /summarise/url` | 500 sats |
+| PDF Summarisation | `POST /summarise/upload` | 500 sats |
+| Code Review | `POST /review/url` | 2000 sats |
+| Code Review | `POST /review/code` | 2000 sats |
+
 ## Quick test
 
 ```bash
 curl -X POST https://parsebit.fly.dev/summarise/url \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://www.cte.iup.edu/cte/Resources/PDF_TestPage.pdf"}'
+  -d '{"url": "https://bitcoin.org/bitcoin.pdf"}'
 ```
 
-## Response format
+Returns `HTTP 402 Payment Required` with a Lightning invoice. Pay it, retry with credentials, get your result.
+
+## Payment flow (L402)
+
+```
+1. POST /summarise/url          →  HTTP 402 + Lightning invoice (500 sats)
+2. Pay invoice via any Lightning wallet
+3. POST /summarise/url          →  HTTP 200 + JSON result
+   Authorization: L402 <macaroon>:<preimage>
+```
+
+## PDF Summarisation response
 
 ```json
 {
@@ -39,63 +57,63 @@ curl -X POST https://parsebit.fly.dev/summarise/url \
 }
 ```
 
-## Endpoints
+## Code Review response
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Health check |
-| POST | `/summarise/upload` | Upload a PDF file (multipart/form-data) |
-| POST | `/summarise/url` | Summarise a PDF from a URL (JSON body) |
-| GET | `/agent-spec.md` | Machine-readable service description for AI agents |
-| GET | `/.well-known/l402.json` | L402 discovery endpoint |
-
-Full docs at `https://parsebit.fly.dev/docs`
-
-## Payment
-
-Protocol: L402 (Bitcoin Lightning Network)  
-Price: 50 satoshis per call (~£0.03)  
-
-Lightning payment layer coming soon. Currently free to use.
+```json
+{
+  "language": "python",
+  "overall_score": 7,
+  "summary": "2-3 sentence assessment",
+  "bugs": [
+    {"severity": "high", "line": 42, "description": "...", "suggestion": "..."}
+  ],
+  "security_issues": [
+    {"severity": "critical", "line": 10, "description": "...", "suggestion": "..."}
+  ],
+  "code_quality": [
+    {"category": "readability", "description": "...", "suggestion": "..."}
+  ],
+  "strengths": ["what the code does well"],
+  "recommended_actions": ["prioritised fix list"],
+  "_meta": {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-6", "truncated": false}
+}
+```
 
 ## Agent discovery
 
-Agents can fetch the service spec at:
+Boltwork is discoverable by any L402-compatible agent:
 
-```
-https://parsebit.fly.dev/agent-spec.md
-```
-
-Listed on the 402 Index for automatic agent discovery.
-
-## Data & privacy
-
-- Text is extracted on Fly.io servers in London (UK)
-- Extracted text is sent to Anthropic's API for summarisation
-- Anthropic does not train on API data by default
-- No document content is stored permanently
-- Full privacy notice: `https://parsebit.fly.dev/agent-spec.md`
+- Agent spec: `https://parsebit.fly.dev/agent-spec.md`
+- Well-known: `https://parsebit.fly.dev/.well-known/l402.json`
+- Listed on [402 Index](https://402index.io)
 
 ## Tech stack
 
 - **FastAPI** — API framework
-- **Claude Sonnet 4.6** — AI summarisation
+- **Claude Sonnet 4.6** — AI analysis
 - **pdfplumber** — PDF text extraction
 - **Fly.io** — Hosting (London region)
-- **L402** — Lightning payment protocol (coming soon)
+- **LND + Aperture** — Lightning L402 payment layer
+- **ACINQ** — Lightning channel (400k sats)
 
 ## Local development
 
 ```bash
-git clone https://github.com/Squidboy30/paresbit
-cd paresbit
+git clone https://github.com/Squidboy30/parsebit
+cd parsebit
 python -m venv venv
-venv\Scripts\activate
+venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 set ANTHROPIC_API_KEY=your-key-here
 uvicorn main:app --reload
 ```
 
-## Licence
+## Data & privacy
 
-MIT
+- Documents processed on Fly.io servers in London (UK)
+- Text sent to Anthropic's API — not used for training by default
+- No content stored permanently
+
+---
+
+By [Cracked Minds](https://crackedminds.co.uk) · MIT Licence

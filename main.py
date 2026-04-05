@@ -7,18 +7,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import Optional
 
-# ---------------------------------------------------------------------------
-# Phase 2: Import the review router (pure addition — zero changes to existing code)
-# ---------------------------------------------------------------------------
 from routers.review import router as review_router
 
 
 def log_call(endpoint: str, status: str, result: dict = None, error: str = None,
              duration_ms: int = 0, file_size_bytes: int = 0, source_url: str = None):
-    """
-    Write a structured JSON log line for every API call.
-    Readable with: flyctl logs --app parsebit
-    """
     entry = {
         "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "endpoint": endpoint,
@@ -39,14 +32,10 @@ def log_call(endpoint: str, status: str, result: dict = None, error: str = None,
         entry["output_tokens"] = meta.get("output_tokens", 0)
     if error:
         entry["error"] = error
-    print("PARSEBIT_LOG " + json.dumps(entry), flush=True)
+    print("BOLTWORK_LOG " + json.dumps(entry), flush=True)
 
 
 async def resolve_hostname_doh(hostname: str) -> str:
-    """
-    Resolve hostname using Google DNS-over-HTTPS (port 443, always open).
-    Falls back to system DNS if DoH fails.
-    """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(
@@ -55,27 +44,21 @@ async def resolve_hostname_doh(hostname: str) -> str:
                 headers={"Accept": "application/dns-json"},
             )
             data = response.json()
-            answers = data.get("Answer", [])
-            for answer in answers:
-                if answer.get("type") == 1:  # A record
+            for answer in data.get("Answer", []):
+                if answer.get("type") == 1:
                     return answer["data"]
     except Exception:
         pass
-    # Fallback to system DNS
     return socket.gethostbyname(hostname)
 
 
 async def fetch_pdf_from_url(url: str, timeout: float = 30.0) -> httpx.Response:
-    """
-    Fetch a URL using DNS-over-HTTPS to bypass Fly.io DNS issues.
-    """
     from urllib.parse import urlparse, urlunparse
     parsed = urlparse(url)
     hostname = parsed.hostname
     try:
         ip = await resolve_hostname_doh(hostname)
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        # Replace hostname with IP in the URL
         netloc = f"{ip}:{port}"
         ip_url = urlunparse((parsed.scheme, netloc, parsed.path,
                              parsed.params, parsed.query, parsed.fragment))
@@ -84,7 +67,6 @@ async def fetch_pdf_from_url(url: str, timeout: float = 30.0) -> httpx.Response:
         ) as http:
             return await http.get(ip_url, headers={"Host": hostname})
     except Exception:
-        # Final fallback — try direct
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as http:
             return await http.get(url)
 
@@ -92,14 +74,11 @@ async def fetch_pdf_from_url(url: str, timeout: float = 30.0) -> httpx.Response:
 SERVICE_URL = os.environ.get("SERVICE_URL", "http://localhost:8000")
 
 app = FastAPI(
-    title="Parsebit API",
-    description="AI-powered document summarisation and code review. Pay-per-call via Lightning L402.",
+    title="Boltwork API",
+    description="Autonomous agent-native AI services. Pay-per-call via Bitcoin Lightning L402.",
     version="2.0.0",
 )
 
-# ---------------------------------------------------------------------------
-# Phase 2: Mount the review router (one line — this is the only change)
-# ---------------------------------------------------------------------------
 app.include_router(review_router)
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -165,23 +144,21 @@ def summarise_text(text: str) -> dict:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Existing endpoints — UNCHANGED
-# ---------------------------------------------------------------------------
-
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "2.0.0"}
+    return {"status": "ok", "version": "2.0.0", "service": "Boltwork"}
 
 
 @app.get("/agent-spec.md", response_class=PlainTextResponse)
 def agent_spec():
-    return f"""# Parsebit API
+    return f"""# Boltwork API
 
 ## What this service does
-Accepts a PDF document or code file and returns a structured JSON analysis.
+Boltwork is an autonomous agent-native AI services API. Agents discover,
+pay, and use services autonomously over Bitcoin Lightning — no accounts,
+no API keys, no subscriptions.
 
-### Summarisation
+### PDF Summarisation
 Accepts a PDF document and returns a structured JSON summary.
 Useful for: research papers, reports, contracts, or any PDF.
 
@@ -193,10 +170,10 @@ Ruby, PHP, Swift, Kotlin, Scala, Shell, SQL, Terraform, and more.
 
 ## Payment Protocol: L402 (Bitcoin Lightning Network)
 - PDF Summarisation: 500 satoshis per call
-- Code Review: 2000 satoshis per call (~£0.50 at current rates)
+- Code Review: 2000 satoshis per call
 
-No account, signup, or API key required.
-Pay the Lightning invoice returned in the 402 response, then retry with the token.
+No account, signup, or API key required. Any Lightning-capable agent
+can use this service autonomously.
 
 ## Base URL
 {SERVICE_URL}
@@ -260,20 +237,21 @@ GET  {SERVICE_URL}/agent-spec.md     - This file (free)
 ## L402 payment flow
 1. Make your request normally.
 2. Receive HTTP 402 with a Lightning invoice in the WWW-Authenticate header.
-3. Pay the invoice with any Lightning wallet or lnget.
+3. Pay the invoice with any Lightning wallet or L402-compatible client.
 4. Retry with: Authorization: L402 <token>:<preimage>
 5. Receive your JSON response.
 
-## Data & privacy
-- Code/documents are processed on Fly.io servers in London (UK)
-- Text is sent to Anthropic's API for analysis
-- Anthropic does not train on API data by default
-- No content is stored permanently by this service
-- Do not submit sensitive personal data, secrets, or proprietary code
-  without reviewing Anthropic's privacy policy: https://www.anthropic.com/privacy
+## Agent discovery
+Boltwork is discoverable by any agent that supports the L402 protocol:
+- Well-known endpoint: {SERVICE_URL}/.well-known/l402.json
+- Listed on the 402 Index: https://402index.io
 
-## Discovery
-Listed on the 402 Index: https://402index.io
+## Data & privacy
+- Documents/code processed on Fly.io servers in London (UK)
+- Text sent to Anthropic's API for analysis
+- Anthropic does not train on API data by default
+- No content stored permanently by this service
+- By Cracked Minds — crackedminds.co.uk
 """
 
 
@@ -281,8 +259,8 @@ Listed on the 402 Index: https://402index.io
 def l402_well_known():
     return {
         "version": "1.0",
-        "name": "Parsebit API",
-        "description": "AI-powered PDF summarisation and code review via Bitcoin Lightning.",
+        "name": "Boltwork",
+        "description": "Autonomous agent-native AI services via Bitcoin Lightning. PDF summarisation and code review.",
         "url": SERVICE_URL,
         "spec": f"{SERVICE_URL}/agent-spec.md",
         "pricing": [
@@ -313,12 +291,13 @@ def l402_well_known():
         ],
         "payment": {"protocol": "L402", "network": "lightning"},
         "contact": os.environ.get("CONTACT_EMAIL", ""),
+        "provider": "Cracked Minds",
+        "provider_url": "https://crackedminds.co.uk",
     }
 
 
 @app.get("/.well-known/agent.json")
 def agent_well_known():
-    """Agent discovery endpoint."""
     return l402_well_known()
 
 
