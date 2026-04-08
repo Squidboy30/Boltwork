@@ -361,3 +361,110 @@ async def summarise_url(body: UrlRequest):
                  source_url=str(body.url),
                  duration_ms=int((time.monotonic() - t0) * 1000))
         raise
+@app.get("/.well-known/ai-plugin.json")
+def ai_plugin():
+    return {
+        "schema_version": "v1",
+        "name_for_human": "Boltwork",
+        "name_for_model": "boltwork",
+        "description_for_human": "PDF summarisation and code review via Bitcoin Lightning. Pay per use, no accounts.",
+        "description_for_model": "Boltwork provides two AI services payable via Bitcoin Lightning L402 micropayments. Use summarise_upload or summarise_url to summarise PDF documents (500 sats each). Use review_code or review_url to get structured code reviews including bugs, security issues, and quality observations (2000 sats each). No API key required — pay via Lightning invoice.",
+        "auth": {
+            "type": "none"
+        },
+        "api": {
+            "type": "openapi",
+            "url": f"{SERVICE_URL}/openapi.json",
+        },
+        "logo_url": f"{SERVICE_URL}/static/logo.png",
+        "contact_email": os.environ.get("CONTACT_EMAIL", "hello@crackedminds.co.uk"),
+        "legal_info_url": "https://crackedminds.co.uk",
+    }
+
+
+@app.get("/llms.txt", response_class=PlainTextResponse)
+def llms_txt():
+    return f"""# Boltwork
+
+> Autonomous agent-native AI services via Bitcoin Lightning. No accounts, no API keys.
+
+Boltwork provides pay-per-use AI services accessible to any Lightning-capable agent using the L402 protocol. Agents pay in Bitcoin satoshis per request with no registration required.
+
+## Services
+
+### PDF Summarisation — 500 sats per request
+- POST {SERVICE_URL}/summarise/upload — Upload a PDF file
+- POST {SERVICE_URL}/summarise/url — Summarise PDF from URL
+- Returns: title, summary, key_points, word_count, language, sentiment, topics
+
+### Code Review — 2000 sats per request
+- POST {SERVICE_URL}/review/code — Submit code as text
+- POST {SERVICE_URL}/review/url — Review code from URL (GitHub/GitLab supported)
+- Returns: overall_score, bugs, security_issues, code_quality, strengths, recommended_actions
+
+## Payment
+Protocol: L402 (Bitcoin Lightning Network)
+1. Make request → receive HTTP 402 with Lightning invoice
+2. Pay invoice with any Lightning wallet
+3. Retry with Authorization: L402 <token>:<preimage>
+4. Receive JSON response
+
+## Discovery
+- Agent spec: {SERVICE_URL}/agent-spec.md
+- L402 manifest: {SERVICE_URL}/.well-known/l402.json
+- OpenAPI spec: {SERVICE_URL}/openapi.json
+- 402 Index: https://402index.io
+
+## Provider
+Cracked Minds — crackedminds.co.uk
+"""
+
+
+@app.get("/.well-known/mcp.json")
+def mcp_well_known():
+    return {
+        "name": "Boltwork",
+        "version": "2.0.0",
+        "description": "PDF summarisation and code review via Bitcoin Lightning L402 micropayments.",
+        "tools": [
+            {
+                "name": "summarise_pdf_upload",
+                "description": "Upload a PDF and receive an AI-generated structured summary. Costs 500 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/summarise/upload",
+                "method": "POST",
+                "price_sats": 500,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "summarise_pdf_url",
+                "description": "Summarise a PDF from a URL. Costs 500 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/summarise/url",
+                "method": "POST",
+                "price_sats": 500,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "review_code",
+                "description": "Submit code for an AI-powered review covering bugs, security issues, and quality. Costs 2000 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/review/code",
+                "method": "POST",
+                "price_sats": 2000,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "review_code_url",
+                "description": "Review code from a URL (GitHub/GitLab supported). Costs 2000 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/review/url",
+                "method": "POST",
+                "price_sats": 2000,
+                "payment_protocol": "L402",
+            },
+        ],
+        "payment": {
+            "protocol": "L402",
+            "network": "lightning",
+            "gateway": "https://parsebit-lnd.fly.dev",
+        },
+        "provider": "Cracked Minds",
+        "provider_url": "https://crackedminds.co.uk",
+    }
