@@ -11,16 +11,18 @@ import json
 import smtplib
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 GMAIL_USER     = os.environ["GMAIL_USER"]
 GMAIL_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 NOTIFY_EMAIL   = os.environ.get("NOTIFY_EMAIL", GMAIL_USER)
+FLY_API_TOKEN  = os.environ.get("FLY_API_TOKEN", "")
 
 BOLTWORK_API  = "https://parsebit.fly.dev"
 BOLTWORK_L402 = "https://parsebit-lnd.fly.dev"
+FLY_APP_NAME  = "parsebit"
 
 TIMEOUT = 15
 
@@ -64,6 +66,72 @@ def check_402(label, url, body):
     return ok, status, "Lightning invoice issued (402 Payment Required)" if ok else detail
 
 
+def get_usage_stats():
+    """Pull last 24h usage from Fly.io logs API."""
+    stats = {
+        "total_calls": 0,
+        "total_sats": 0,
+        "endpoints": {},
+        "errors": 0,
+        "available": False
+    }
+
+    if not FLY_API_TOKEN:
+        return stats
+
+    try:
+        since = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        url = f"https://api.fly.io/v1/apps/{FLY_APP_NAME}/logs?limit=2000&since={since}"
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Bearer {FLY_API_TOKEN}")
+        req.add_header("Accept", "application/json")
+
+        with urllib.request.urlopen(req, timeout=15) as r:
+            raw = r.read().decode()
+
+        # Parse NDJSON log lines
+        price_map = {
+            "/summarise/upload": 50,
+            "/summarise/url": 50,
+            "/review/code": 2000,
+            "/review/url": 2000,
+        }
+
+        for line in raw.strip().split("\n"):
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+                msg = entry.get("message", "") or entry.get("text", "")
+                if "BOLTWORK_LOG" not in msg:
+                    continue
+                log_json = msg.split("BOLTWORK_LOG", 1)[1].strip()
+                log = json.loads(log_json)
+                endpoint = log.get("endpoint", "unknown")
+                status = log.get("status", "")
+                stats["total_calls"] += 1
+                if status == "error":
+                    stats["errors"] += 1
+                sats = price_map.get(endpoint, 0)
+                if status == "success":
+                    stats["total_sats"] += sats
+                if endpoint not in stats["endpoints"]:
+                    stats["endpoints"][endpoint] = {"calls": 0, "success": 0, "sats": 0}
+                stats["endpoints"][endpoint]["calls"] += 1
+                if status == "success":
+                    stats["endpoints"][endpoint]["success"] += 1
+                    stats["endpoints"][endpoint]["sats"] += sats
+            except Exception:
+                continue
+
+        stats["available"] = True
+
+    except Exception as e:
+        stats["error_msg"] = str(e)[:100]
+
+    return stats
+
+
 def run_checks():
     now = datetime.now(timezone.utc)
     results = []
@@ -104,7 +172,7 @@ def run_checks():
         "detail": "Accessible" if ok else detail
     })
 
-    # 4–7. Lightning gates
+    # 4-7. Lightning gates
     gates = [
         ("Lightning gate — /summarise/upload", f"{BOLTWORK_L402}/summarise/upload", "{}"),
         ("Lightning gate — /summarise/url", f"{BOLTWORK_L402}/summarise/url", '{"url":"https://example.com/test.pdf"}'),
@@ -115,11 +183,14 @@ def run_checks():
         ok, status, detail = check_402(name, url, body)
         results.append({"name": name, "ok": ok, "status": status, "detail": detail})
 
+    # Usage stats
+    usage = get_usage_stats()
+
     all_ok = all(r["ok"] for r in results)
-    return now, results, all_ok
+    return now, results, all_ok, usage
 
 
-def build_email(now, results, all_ok):
+def build_email(now, results, all_ok, usage):
     total   = len(results)
     passing = sum(1 for r in results if r["ok"])
     failing = total - passing
@@ -128,11 +199,26 @@ def build_email(now, results, all_ok):
     status_text  = "ALL SYSTEMS OPERATIONAL" if all_ok else f"{failing} SERVICE(S) DOWN"
     date_str     = now.strftime("%A %d %B %Y, %H:%M UTC")
 
+    # Plain text usage section
+    usage_lines = ["", "--- Usage (Last 24h) ---"]
+    if usage["available"]:
+        usage_lines.append(f"Total API calls: {usage['total_calls']}")
+        usage_lines.append(f"Total sats earned: {usage['total_sats']} sats")
+        usage_lines.append(f"Errors: {usage['errors']}")
+        if usage["endpoints"]:
+            usage_lines.append("")
+            for ep, data in sorted(usage["endpoints"].items()):
+                usage_lines.append(f"  {ep}: {data['calls']} calls, {data['success']} success, {data['sats']} sats")
+    else:
+        usage_lines.append("Usage data unavailable (check FLY_API_TOKEN secret)")
+
     lines = [
         "Boltwork Daily Health Report",
         date_str, "",
         f"Status: {status_text}",
-        f"Checks: {passing}/{total} passing", "",
+        f"Checks: {passing}/{total} passing",
+    ] + usage_lines + [
+        "",
         "--- Service Checks ---",
     ]
     for r in results:
@@ -150,6 +236,43 @@ def build_email(now, results, all_ok):
         "Boltwork by Cracked Minds — crackedminds.co.uk",
     ]
     plain = "\n".join(lines)
+
+    # HTML usage section
+    if usage["available"]:
+        ep_rows = ""
+        for ep, data in sorted(usage["endpoints"].items()):
+            ep_rows += f"""
+            <tr>
+              <td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#555">{ep}</td>
+              <td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;text-align:center">{data['calls']}</td>
+              <td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;text-align:center;color:#22c55e">{data['success']}</td>
+              <td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;text-align:right;color:#f59e0b">{data['sats']} sats</td>
+            </tr>"""
+
+        usage_html = f"""
+      <div style="margin-bottom:24px">
+        <div style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px">Usage — Last 24h</div>
+        <div style="display:flex;gap:16px;margin-bottom:16px">
+          <div style="text-align:center;flex:1;background:#f9f9f9;border-radius:8px;padding:12px">
+            <div style="font-size:28px;font-weight:700;color:#333">{usage['total_calls']}</div>
+            <div style="font-size:11px;color:#888;margin-top:2px">API CALLS</div>
+          </div>
+          <div style="text-align:center;flex:1;background:#f9f9f9;border-radius:8px;padding:12px">
+            <div style="font-size:28px;font-weight:700;color:#f59e0b">{usage['total_sats']}</div>
+            <div style="font-size:11px;color:#888;margin-top:2px">SATS EARNED</div>
+          </div>
+          <div style="text-align:center;flex:1;background:#f9f9f9;border-radius:8px;padding:12px">
+            <div style="font-size:28px;font-weight:700;color:{'#ef4444' if usage['errors'] > 0 else '#888'}">{usage['errors']}</div>
+            <div style="font-size:11px;color:#888;margin-top:2px">ERRORS</div>
+          </div>
+        </div>
+        {'<table style="width:100%;border-collapse:collapse"><thead><tr style="background:#f9f9f9"><th style="padding:8px 12px;text-align:left;font-size:11px;color:#888;font-weight:500">Endpoint</th><th style="padding:8px 12px;text-align:center;font-size:11px;color:#888;font-weight:500">Calls</th><th style="padding:8px 12px;text-align:center;font-size:11px;color:#888;font-weight:500">Success</th><th style="padding:8px 12px;text-align:right;font-size:11px;color:#888;font-weight:500">Sats</th></tr></thead><tbody>' + ep_rows + '</tbody></table>' if ep_rows else '<div style="font-size:13px;color:#aaa;padding:8px 0">No API calls in the last 24 hours.</div>'}
+      </div>"""
+    else:
+        usage_html = """
+      <div style="margin-bottom:24px;padding:12px;background:#f9f9f9;border-radius:8px">
+        <div style="font-size:13px;color:#aaa">Usage data unavailable — check FLY_API_TOKEN secret.</div>
+      </div>"""
 
     rows = ""
     for r in results:
@@ -190,6 +313,8 @@ def build_email(now, results, all_ok):
           <div style="font-size:12px;color:#888;margin-top:4px">TOTAL CHECKS</div>
         </div>
       </div>
+      {usage_html}
+      <div style="font-size:13px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px">Service Checks</div>
       <table style="width:100%;border-collapse:collapse">
         <thead><tr style="background:#f9f9f9">
           <th style="padding:10px 12px;text-align:left;font-size:12px;color:#888;font-weight:500"></th>
@@ -225,11 +350,12 @@ def send_email(plain, html, subject):
 
 if __name__ == "__main__":
     print("Running Boltwork health checks...")
-    now, results, all_ok = run_checks()
+    now, results, all_ok, usage = run_checks()
     for r in results:
         icon = "✓" if r["ok"] else "✗"
         print(f"  {icon} {r['name']}: HTTP {r['status']} — {r['detail'][:80]}")
-    plain, html, status_text = build_email(now, results, all_ok)
+    print(f"\nUsage stats: {usage['total_calls']} calls, {usage['total_sats']} sats earned")
+    plain, html, status_text = build_email(now, results, all_ok, usage)
     subject = f"{'✅' if all_ok else '🚨'} Boltwork — {status_text} — {now.strftime('%d %b %Y')}"
     print(f"\nSending: {subject}")
     send_email(plain, html, subject)
