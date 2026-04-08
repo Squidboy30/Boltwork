@@ -91,10 +91,13 @@ def get_usage_stats():
 
         # Parse NDJSON log lines
         price_map = {
-            "/summarise/upload": 50,
-            "/summarise/url": 50,
+            "/summarise/upload": 500,
+            "/summarise/url": 500,
             "/review/code": 2000,
             "/review/url": 2000,
+            "/extract/webpage": 100,
+            "/extract/data": 200,
+            "/translate": 150,
         }
 
         for line in raw.strip().split("\n"):
@@ -178,6 +181,9 @@ def run_checks():
         ("Lightning gate — /summarise/url", f"{BOLTWORK_L402}/summarise/url", '{"url":"https://example.com/test.pdf"}'),
         ("Lightning gate — /review/code (2000 sats)", f"{BOLTWORK_L402}/review/code", '{"code":"def hello(): pass"}'),
         ("Lightning gate — /review/url (2000 sats)", f"{BOLTWORK_L402}/review/url", '{"url":"https://github.com/Squidboy30/parsebit/blob/main/main.py"}'),
+        ("Lightning gate — /extract/webpage (100 sats)", f"{BOLTWORK_L402}/extract/webpage", '{"url":"https://example.com"}'),
+        ("Lightning gate — /extract/data (200 sats)", f"{BOLTWORK_L402}/extract/data", '{"url":"https://example.com/test.pdf"}'),
+        ("Lightning gate — /translate (150 sats)", f"{BOLTWORK_L402}/translate", '{"text":"hello world","target_language":"spanish"}'),
     ]
     for name, url, body in gates:
         ok, status, detail = check_402(name, url, body)
