@@ -175,7 +175,30 @@ def run_checks():
         "detail": "Accessible" if ok else detail
     })
 
-    # 4-7. Lightning gates
+    # 4. FastAPI route checks (direct, bypassing Aperture)
+    # These return 422 (validation error) not 404 if the route exists
+    routes = [
+        ("FastAPI route — /summarise/url", f"{BOLTWORK_API}/summarise/url", '{"url":"https://example.com"}', 422),
+        ("FastAPI route — /review/code", f"{BOLTWORK_API}/review/code", '{"code":"x"}', 200),
+        ("FastAPI route — /extract/webpage", f"{BOLTWORK_API}/extract/webpage", '{"url":"https://example.com"}', 200),
+        ("FastAPI route — /extract/data", f"{BOLTWORK_API}/extract/data", '{"url":"https://example.com/test.pdf"}', [400, 415, 422]),
+        ("FastAPI route — /translate", f"{BOLTWORK_API}/translate", '{"text":"hello","target_language":"spanish"}', 200),
+    ]
+    for name, url, body, expected in routes:
+        if isinstance(expected, list):
+            ok, status, detail = check(name, url, method="POST",
+                body=body, headers={"Content-Type": "application/json"})
+            ok = status in expected
+            detail = f"HTTP {status} — route reachable" if ok else f"HTTP {status} — unexpected"
+        else:
+            ok, status, detail = check(name, url, method="POST",
+                body=body, headers={"Content-Type": "application/json"},
+                expected_status=expected)
+            if ok:
+                detail = f"Route reachable (HTTP {status})"
+        results.append({"name": name, "ok": ok, "status": status, "detail": detail})
+
+    # 5-11. Lightning gates (Aperture 402 checks)
     gates = [
         ("Lightning gate — /summarise/upload", f"{BOLTWORK_L402}/summarise/upload", "{}"),
         ("Lightning gate — /summarise/url", f"{BOLTWORK_L402}/summarise/url", '{"url":"https://example.com/test.pdf"}'),
