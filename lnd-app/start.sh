@@ -56,13 +56,13 @@ services:
     pathregexp: '^/summarise/upload.*$'
     address: "parsebit.fly.dev"
     protocol: https
-    price: 50
+    price: 500
   - name: "summarise-url"
     hostregexp: 'parsebit-lnd.fly.dev'
     pathregexp: '^/summarise/url.*$'
     address: "parsebit.fly.dev"
     protocol: https
-    price: 50
+    price: 500
   - name: "review-code"
     hostregexp: 'parsebit-lnd.fly.dev'
     pathregexp: '^/review/code.*$'
@@ -99,7 +99,7 @@ services:
     address: "parsebit.fly.dev"
     protocol: https
     price: 0
-    - name: "analyse-tables"
+  - name: "analyse-tables"
     hostregexp: 'parsebit-lnd.fly.dev'
     pathregexp: '^/analyse/tables.*$'
     address: "parsebit.fly.dev"
