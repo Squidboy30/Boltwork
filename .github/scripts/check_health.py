@@ -96,6 +96,9 @@ def get_usage_stats():
             "/extract/webpage": 100,
             "/extract/data": 200,
             "/translate": 150,
+            "/analyse/tables": 300,
+            "/analyse/compare": 500,
+            "/analyse/explain": 500,
         }
 
         for line in raw.strip().split("\n"):
@@ -182,6 +185,9 @@ def run_checks():
         ("FastAPI route — /extract/webpage", f"{BOLTWORK_API}/extract/webpage", '{}', [422]),
         ("FastAPI route — /extract/data", f"{BOLTWORK_API}/extract/data", '{}', [422]),
         ("FastAPI route — /translate", f"{BOLTWORK_API}/translate", '{}', [422]),
+        ("FastAPI route — /analyse/tables", f"{BOLTWORK_API}/analyse/tables", '{}', [422]),
+        ("FastAPI route — /analyse/compare", f"{BOLTWORK_API}/analyse/compare", '{}', [422]),
+        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [422]),
     ]
     for name, url, body, expected in routes:
         ok, status, detail = check(name, url, method="POST",
@@ -199,6 +205,9 @@ def run_checks():
         ("Lightning gate — /extract/webpage (100 sats)", f"{BOLTWORK_L402}/extract/webpage", '{"url":"https://example.com"}'),
         ("Lightning gate — /extract/data (200 sats)", f"{BOLTWORK_L402}/extract/data", '{"url":"https://example.com/test.pdf"}'),
         ("Lightning gate — /translate (150 sats)", f"{BOLTWORK_L402}/translate", '{"text":"hello world","target_language":"spanish"}'),
+        ("Lightning gate — /analyse/tables (300 sats)", f"{BOLTWORK_L402}/analyse/tables", '{"url":"https://example.com/test.pdf"}'),
+        ("Lightning gate — /analyse/compare (500 sats)", f"{BOLTWORK_L402}/analyse/compare", '{"url_a":"https://example.com/a.pdf","url_b":"https://example.com/b.pdf"}'),
+        ("Lightning gate — /analyse/explain (500 sats)", f"{BOLTWORK_L402}/analyse/explain", '{"code":"def hello(): pass"}'),
     ]
     for name, url, body in gates:
         ok, status, detail = check_402(name, url, body)
