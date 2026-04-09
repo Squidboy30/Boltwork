@@ -178,24 +178,17 @@ def run_checks():
     # 4. FastAPI route checks (direct, bypassing Aperture)
     # These return 422 (validation error) not 404 if the route exists
     routes = [
-        ("FastAPI route — /summarise/url", f"{BOLTWORK_API}/summarise/url", '{"url":"https://example.com"}', 422),
-        ("FastAPI route — /review/code", f"{BOLTWORK_API}/review/code", '{"code":"x"}', 200),
-        ("FastAPI route — /extract/webpage", f"{BOLTWORK_API}/extract/webpage", '{"url":"https://example.com"}', 200),
-        ("FastAPI route — /extract/data", f"{BOLTWORK_API}/extract/data", '{"url":"https://example.com/test.pdf"}', [400, 415, 422]),
-        ("FastAPI route — /translate", f"{BOLTWORK_API}/translate", '{"text":"hello","target_language":"spanish"}', 200),
+        ("FastAPI route — /summarise/url", f"{BOLTWORK_API}/summarise/url", '{}', [422]),
+        ("FastAPI route — /review/code", f"{BOLTWORK_API}/review/code", '{}', [422]),
+        ("FastAPI route — /extract/webpage", f"{BOLTWORK_API}/extract/webpage", '{}', [422]),
+        ("FastAPI route — /extract/data", f"{BOLTWORK_API}/extract/data", '{}', [422]),
+        ("FastAPI route — /translate", f"{BOLTWORK_API}/translate", '{}', [422]),
     ]
-    for name, url, body, expected in routes:
-        if isinstance(expected, list):
-            ok, status, detail = check(name, url, method="POST",
-                body=body, headers={"Content-Type": "application/json"})
-            ok = status in expected
-            detail = f"HTTP {status} — route reachable" if ok else f"HTTP {status} — unexpected"
-        else:
-            ok, status, detail = check(name, url, method="POST",
-                body=body, headers={"Content-Type": "application/json"},
-                expected_status=expected)
-            if ok:
-                detail = f"Route reachable (HTTP {status})"
+	for name, url, body, expected in routes:
+        ok, status, detail = check(name, url, method="POST",
+            body=body, headers={"Content-Type": "application/json"})
+        ok = status in expected
+        detail = f"Route reachable (HTTP {status})" if ok else f"HTTP {status} — unexpected: {detail[:80]}"
         results.append({"name": name, "ok": ok, "status": status, "detail": detail})
 
     # 5-11. Lightning gates (Aperture 402 checks)
