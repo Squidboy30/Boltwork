@@ -67,7 +67,6 @@ def check_402(label, url, body):
 
 
 def get_usage_stats():
-    """Pull last 24h usage from Fly.io logs API."""
     stats = {
         "total_calls": 0,
         "total_sats": 0,
@@ -89,7 +88,6 @@ def get_usage_stats():
         with urllib.request.urlopen(req, timeout=15) as r:
             raw = r.read().decode()
 
-        # Parse NDJSON log lines
         price_map = {
             "/summarise/upload": 500,
             "/summarise/url": 500,
@@ -153,12 +151,14 @@ def run_checks():
         "detail": f"v{version} — online" if ok else detail
     })
 
-    # 2. Agent discovery
+    # 2. Agent discovery — re-fetch full content to count endpoints
     ok, status, detail = check("L402 discovery", f"{BOLTWORK_API}/.well-known/l402.json", expected_status=200)
     endpoint_count = 0
     try:
-        data = json.loads(detail)
-        endpoint_count = len(data.get("pricing", []))
+        req = urllib.request.Request(f"{BOLTWORK_API}/.well-known/l402.json")
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            full_data = json.loads(r.read())
+            endpoint_count = len(full_data.get("pricing", []))
     except Exception:
         pass
     results.append({
@@ -175,8 +175,7 @@ def run_checks():
         "detail": "Accessible" if ok else detail
     })
 
-    # 4. FastAPI route checks (direct, bypassing Aperture)
-    # These return 422 (validation error) not 404 if the route exists
+    # 4. FastAPI route checks — empty body triggers 422 if route exists
     routes = [
         ("FastAPI route — /summarise/url", f"{BOLTWORK_API}/summarise/url", '{}', [422]),
         ("FastAPI route — /review/code", f"{BOLTWORK_API}/review/code", '{}', [422]),
@@ -184,7 +183,7 @@ def run_checks():
         ("FastAPI route — /extract/data", f"{BOLTWORK_API}/extract/data", '{}', [422]),
         ("FastAPI route — /translate", f"{BOLTWORK_API}/translate", '{}', [422]),
     ]
-	for name, url, body, expected in routes:
+    for name, url, body, expected in routes:
         ok, status, detail = check(name, url, method="POST",
             body=body, headers={"Content-Type": "application/json"})
         ok = status in expected
@@ -196,7 +195,7 @@ def run_checks():
         ("Lightning gate — /summarise/upload", f"{BOLTWORK_L402}/summarise/upload", "{}"),
         ("Lightning gate — /summarise/url", f"{BOLTWORK_L402}/summarise/url", '{"url":"https://example.com/test.pdf"}'),
         ("Lightning gate — /review/code (2000 sats)", f"{BOLTWORK_L402}/review/code", '{"code":"def hello(): pass"}'),
-        ("Lightning gate — /review/url (2000 sats)", f"{BOLTWORK_L402}/review/url", '{"url":"https://github.com/Squidboy30/parsebit/blob/main/main.py"}'),
+        ("Lightning gate — /review/url (2000 sats)", f"{BOLTWORK_L402}/review/url", '{"url":"https://github.com/Squidboy30/Boltwork/blob/main/main.py"}'),
         ("Lightning gate — /extract/webpage (100 sats)", f"{BOLTWORK_L402}/extract/webpage", '{"url":"https://example.com"}'),
         ("Lightning gate — /extract/data (200 sats)", f"{BOLTWORK_L402}/extract/data", '{"url":"https://example.com/test.pdf"}'),
         ("Lightning gate — /translate (150 sats)", f"{BOLTWORK_L402}/translate", '{"text":"hello world","target_language":"spanish"}'),
@@ -205,9 +204,7 @@ def run_checks():
         ok, status, detail = check_402(name, url, body)
         results.append({"name": name, "ok": ok, "status": status, "detail": detail})
 
-    # Usage stats
     usage = get_usage_stats()
-
     all_ok = all(r["ok"] for r in results)
     return now, results, all_ok, usage
 
@@ -221,7 +218,6 @@ def build_email(now, results, all_ok, usage):
     status_text  = "ALL SYSTEMS OPERATIONAL" if all_ok else f"{failing} SERVICE(S) DOWN"
     date_str     = now.strftime("%A %d %B %Y, %H:%M UTC")
 
-    # Plain text usage section
     usage_lines = ["", "--- Usage (Last 24h) ---"]
     if usage["available"]:
         usage_lines.append(f"Total API calls: {usage['total_calls']}")
@@ -252,14 +248,13 @@ def build_email(now, results, all_ok, usage):
         "--- Links ---",
         f"API: {BOLTWORK_API}",
         f"L402 Gateway: {BOLTWORK_L402}",
-        "GitHub: https://github.com/Squidboy30/parsebit",
+        "GitHub: https://github.com/Squidboy30/Boltwork",
         "402 Index: https://402index.io",
         "",
         "Boltwork by Cracked Minds — crackedminds.co.uk",
     ]
     plain = "\n".join(lines)
 
-    # HTML usage section
     if usage["available"]:
         ep_rows = ""
         for ep, data in sorted(usage["endpoints"].items()):
@@ -347,7 +342,7 @@ def build_email(now, results, all_ok, usage):
       </table>
       <div style="margin-top:24px;padding-top:16px;border-top:1px solid #f0f0f0;font-size:12px;color:#aaa">
         <a href="{BOLTWORK_API}" style="color:#666;text-decoration:none">Boltwork API</a> &nbsp;·&nbsp;
-        <a href="https://github.com/Squidboy30/parsebit" style="color:#666;text-decoration:none">GitHub</a> &nbsp;·&nbsp;
+        <a href="https://github.com/Squidboy30/Boltwork" style="color:#666;text-decoration:none">GitHub</a> &nbsp;·&nbsp;
         <a href="https://402index.io" style="color:#666;text-decoration:none">402 Index</a> &nbsp;·&nbsp;
         <a href="https://crackedminds.co.uk" style="color:#666;text-decoration:none">Cracked Minds</a>
       </div>
