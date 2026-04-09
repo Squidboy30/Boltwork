@@ -517,7 +517,7 @@ def mcp_well_known():
         "name": "Boltwork",
         "version": "2.0.0",
         "description": "AI services via Bitcoin Lightning L402: PDF summarisation, code review, web page summarisation, data extraction, translation, table extraction, document comparison, and code explanation.",
-        "tools": [:
+        "tools": [
             {
                 "name": "summarise_pdf_upload",
                 "description": "Upload a PDF and receive an AI-generated structured summary. Costs 500 sats via Lightning.",
