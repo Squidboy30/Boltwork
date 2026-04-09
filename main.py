@@ -9,6 +9,7 @@ from typing import Optional
 
 from routers.review import router as review_router
 from routers.extract import router as extract_router
+from routers.analyse import router as analyse_router
 
 def log_call(endpoint: str, status: str, result: dict = None, error: str = None,
              duration_ms: int = 0, file_size_bytes: int = 0, source_url: str = None):
@@ -81,6 +82,7 @@ app = FastAPI(
 
 app.include_router(review_router)
 app.include_router(extract_router)
+app.include_router(analyse_router)
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
@@ -182,12 +184,20 @@ receipts, and forms.
 Accepts text directly or a PDF/web page URL and translates to any of 24
 supported languages. Returns translated text with source language detection.
 
+### Analysis
+POST {SERVICE_URL}/analyse/tables   - Extract all tables from a PDF as structured JSON (JSON body: url, max_pages)
+POST {SERVICE_URL}/analyse/compare  - Compare two PDFs (JSON body: url_a, url_b, max_pages)
+POST {SERVICE_URL}/analyse/explain  - Explain code in plain English (JSON body: code or url, language?)
+
 ## Payment Protocol: L402 (Bitcoin Lightning Network)
 - PDF Summarisation: 500 satoshis per call
 - Code Review: 2000 satoshis per call
 - Web Page Summarisation: 100 satoshis per call
 - Data Extraction: 200 satoshis per call
 - Translation: 150 satoshis per call
+- Table Extraction: 300 satoshis per call
+- Document Comparison: 500 satoshis per call
+- Code Explanation: 500 satoshis per call
 
 No account, signup, or API key required. Any Lightning-capable agent
 can use this service autonomously.
@@ -282,7 +292,7 @@ def l402_well_known():
     return {
         "version": "1.0",
         "name": "Boltwork",
-        "description": "Boltwork provides AI services via Bitcoin Lightning L402. PDF summarisation (500 sats), code review (2000 sats), web page summarisation (100 sats), data extraction from PDFs (200 sats), and translation (150 sats). No API key required.",
+        "description": "Boltwork provides AI services via Bitcoin Lightning L402. PDF summarisation (500 sats), code review (2000 sats), web page summarisation (100 sats), data extraction (200 sats), translation (150 sats), table extraction (300 sats), document comparison (500 sats), and code explanation (500 sats). No API key required.",
         "url": SERVICE_URL,
         "spec": f"{SERVICE_URL}/agent-spec.md",
         "pricing": [
@@ -327,6 +337,24 @@ def l402_well_known():
                 "method": "POST",
                 "price_sats": 150,
                 "description": "Translate text or a document URL to a target language",
+            },
+            {
+                "endpoint": "/analyse/tables",
+                "method": "POST",
+                "price_sats": 300,
+                "description": "Extract all tables from a PDF as structured JSON",
+            },
+            {
+                "endpoint": "/analyse/compare",
+                "method": "POST",
+                "price_sats": 500,
+                "description": "Compare two PDFs and return a structured diff",
+            },
+            {
+                "endpoint": "/analyse/explain",
+                "method": "POST",
+                "price_sats": 500,
+                "description": "Explain what code does in plain English",
             },
         ],
         "payment": {"protocol": "L402", "network": "lightning"},
@@ -453,6 +481,18 @@ Boltwork provides pay-per-use AI services accessible to any Lightning-capable ag
 - POST {SERVICE_URL}/translate — Translate text or document to target language
 - Returns: source_language, target_language, translated_text, notes
 
+### Table Extraction — 300 sats per request
+- POST {SERVICE_URL}/analyse/tables — Extract all tables from a PDF as structured JSON
+- Returns: table_count, tables (with headers and rows), summary
+
+### Document Comparison — 500 sats per request
+- POST {SERVICE_URL}/analyse/compare — Compare two PDFs (body: url_a, url_b)
+- Returns: additions, removals, modifications, overall_similarity, recommendation
+
+### Code Explanation — 500 sats per request
+- POST {SERVICE_URL}/analyse/explain — Explain what code does in plain English
+- Returns: purpose, explanation, sections, key_concepts, inputs, outputs
+
 ## Payment
 Protocol: L402 (Bitcoin Lightning Network)
 1. Make request → receive HTTP 402 with Lightning invoice
@@ -476,8 +516,8 @@ def mcp_well_known():
     return {
         "name": "Boltwork",
         "version": "2.0.0",
-        "description": "AI services via Bitcoin Lightning L402: PDF summarisation, code review, web page summarisation, data extraction, and translation.",
-        "tools": [
+        "description": "AI services via Bitcoin Lightning L402: PDF summarisation, code review, web page summarisation, data extraction, translation, table extraction, document comparison, and code explanation.",
+        "tools": [:
             {
                 "name": "summarise_pdf_upload",
                 "description": "Upload a PDF and receive an AI-generated structured summary. Costs 500 sats via Lightning.",
@@ -532,6 +572,30 @@ def mcp_well_known():
                 "endpoint": f"{SERVICE_URL}/translate",
                 "method": "POST",
                 "price_sats": 150,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "analyse_tables",
+                "description": "Extract all tables from a PDF as structured JSON. Costs 300 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/analyse/tables",
+                "method": "POST",
+                "price_sats": 300,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "analyse_compare",
+                "description": "Compare two PDFs and return a structured diff with additions, removals, and modifications. Costs 500 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/analyse/compare",
+                "method": "POST",
+                "price_sats": 500,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "analyse_explain",
+                "description": "Explain what code does in plain English. Costs 500 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/analyse/explain",
+                "method": "POST",
+                "price_sats": 500,
                 "payment_protocol": "L402",
             },
         ],

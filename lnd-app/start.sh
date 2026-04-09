@@ -99,6 +99,24 @@ services:
     address: "parsebit.fly.dev"
     protocol: https
     price: 0
+    - name: "analyse-tables"
+    hostregexp: 'parsebit-lnd.fly.dev'
+    pathregexp: '^/analyse/tables.*$'
+    address: "parsebit.fly.dev"
+    protocol: https
+    price: 300
+  - name: "analyse-compare"
+    hostregexp: 'parsebit-lnd.fly.dev'
+    pathregexp: '^/analyse/compare.*$'
+    address: "parsebit.fly.dev"
+    protocol: https
+    price: 500
+  - name: "analyse-explain"
+    hostregexp: 'parsebit-lnd.fly.dev'
+    pathregexp: '^/analyse/explain.*$'
+    address: "parsebit.fly.dev"
+    protocol: https
+    price: 500
 CONF
 # Start Aperture
 /usr/local/bin/aperture --configfile=/root/.lnd/.aperture/aperture.yaml &
