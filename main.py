@@ -10,6 +10,9 @@ from typing import Optional
 from routers.review import router as review_router
 from routers.extract import router as extract_router
 from routers.analyse import router as analyse_router
+from routers.trial import router as trial_router
+from routers.memory import router as memory_router
+from routers.workflow import router as workflow_router
 
 def log_call(endpoint: str, status: str, result: dict = None, error: str = None,
              duration_ms: int = 0, file_size_bytes: int = 0, source_url: str = None):
@@ -83,6 +86,9 @@ app = FastAPI(
 app.include_router(review_router)
 app.include_router(extract_router)
 app.include_router(analyse_router)
+app.include_router(trial_router)
+app.include_router(memory_router)
+app.include_router(workflow_router)
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
@@ -198,6 +204,10 @@ POST {SERVICE_URL}/analyse/explain  - Explain code in plain English (JSON body: 
 - Table Extraction: 300 satoshis per call
 - Document Comparison: 500 satoshis per call
 - Code Explanation: 500 satoshis per call
+- Agent Memory Write: 10 satoshis per call
+- Agent Memory Read: 5 satoshis per call
+- Workflow Pipeline: 1000 satoshis per run
+- Trial endpoints: free (rate-limited, capped input)
 
 No account, signup, or API key required. Any Lightning-capable agent
 can use this service autonomously.
@@ -220,6 +230,21 @@ POST {SERVICE_URL}/review/url        - Review code from URL (JSON body: url, lan
 POST {SERVICE_URL}/extract/webpage   - Summarise any web page (JSON body: url)
 POST {SERVICE_URL}/extract/data      - Extract structured data from PDF (JSON body: url, max_pages)
 POST {SERVICE_URL}/translate         - Translate text or document (JSON body: text or url, target_language)
+
+### Workflow (Pipeline Composition)
+POST {SERVICE_URL}/workflow/run      - Chain services in a single call (JSON body: steps[], label?)
+GET  {SERVICE_URL}/workflow/info     - Supported services and pipeline syntax (free)
+
+### Agent Memory
+POST {SERVICE_URL}/memory/store      - Write key-value pairs for your agent (JSON body: agent_id, entries{{}})
+POST {SERVICE_URL}/memory/retrieve   - Read stored keys (JSON body: agent_id, keys[]?)
+POST {SERVICE_URL}/memory/delete     - Delete a key (JSON body: agent_id, key) — free
+GET  {SERVICE_URL}/memory/info       - Memory service info and limits (free)
+
+### Trial (Free — no Lightning payment required)
+POST {SERVICE_URL}/trial/review      - Capped code review, 500 char input, 5 calls/hr/IP
+POST {SERVICE_URL}/trial/summarise   - Capped text summary, 1000 char input, 5 calls/hr/IP
+GET  {SERVICE_URL}/trial/info        - Trial limits and upgrade guide
 
 ### Utility
 GET  {SERVICE_URL}/health            - Health check (free)
@@ -292,7 +317,7 @@ def l402_well_known():
     return {
         "version": "1.0",
         "name": "Boltwork",
-        "description": "Boltwork provides AI services via Bitcoin Lightning L402. PDF summarisation (500 sats), code review (2000 sats), web page summarisation (100 sats), data extraction (200 sats), translation (150 sats), table extraction (300 sats), document comparison (500 sats), and code explanation (500 sats). No API key required.",
+        "description": "Boltwork provides AI services via Bitcoin Lightning L402. PDF summarisation (500 sats), code review (2000 sats), web page summarisation (100 sats), data extraction (200 sats), translation (150 sats), table extraction (300 sats), document comparison (500 sats), code explanation (500 sats), workflow pipelines (1000 sats), agent memory write (10 sats), agent memory read (5 sats). Trial endpoints free. No API key required.",
         "url": SERVICE_URL,
         "spec": f"{SERVICE_URL}/agent-spec.md",
         "pricing": [
@@ -355,6 +380,42 @@ def l402_well_known():
                 "method": "POST",
                 "price_sats": 500,
                 "description": "Explain what code does in plain English",
+            },
+            {
+                "endpoint": "/workflow/run",
+                "method": "POST",
+                "price_sats": 1000,
+                "description": "Execute a multi-step service pipeline in a single call",
+            },
+            {
+                "endpoint": "/memory/store",
+                "method": "POST",
+                "price_sats": 10,
+                "description": "Write key-value memory entries for your agent (max 10 keys/call)",
+            },
+            {
+                "endpoint": "/memory/retrieve",
+                "method": "POST",
+                "price_sats": 5,
+                "description": "Read stored memory keys for your agent",
+            },
+            {
+                "endpoint": "/memory/delete",
+                "method": "POST",
+                "price_sats": 0,
+                "description": "Delete a memory key (free)",
+            },
+            {
+                "endpoint": "/trial/review",
+                "method": "POST",
+                "price_sats": 0,
+                "description": "Free trial code review — 500 char cap, 5 calls/hr/IP",
+            },
+            {
+                "endpoint": "/trial/summarise",
+                "method": "POST",
+                "price_sats": 0,
+                "description": "Free trial text summary — 1000 char cap, 5 calls/hr/IP",
             },
         ],
         "payment": {"protocol": "L402", "network": "lightning"},
@@ -493,6 +554,25 @@ Boltwork provides pay-per-use AI services accessible to any Lightning-capable ag
 - POST {SERVICE_URL}/analyse/explain — Explain what code does in plain English
 - Returns: purpose, explanation, sections, key_concepts, inputs, outputs
 
+### Workflow Pipeline — 1000 sats per run
+- POST {SERVICE_URL}/workflow/run  — Chain services in a single call (body: steps[], label?)
+- GET  {SERVICE_URL}/workflow/info — Supported services and pipeline syntax (free)
+- Returns: final_output, step_results[], _meta with total tokens and duration
+- Supported services: webpage, pdf, translate, data, tables, explain, review, compare
+- Chain outputs using {{"$from": N}} to pass step N's result into the next step
+
+### Agent Memory — 10 sats write / 5 sats read
+- POST {SERVICE_URL}/memory/store    — Write key-value pairs for your agent (JSON: agent_id, entries{{}})
+- POST {SERVICE_URL}/memory/retrieve — Read stored keys (JSON: agent_id, keys[]?)
+- POST {SERVICE_URL}/memory/delete   — Delete a key (free)
+- GET  {SERVICE_URL}/memory/info     — Limits and pricing info (free)
+- Returns: entries dict, updated_at timestamps, quota_remaining
+
+### Trial (Free — no Lightning payment)
+- POST {SERVICE_URL}/trial/review    — Real code review, 500 char input cap, 5 calls/hr/IP
+- POST {SERVICE_URL}/trial/summarise — Real text summary, 1000 char input cap, 5 calls/hr/IP
+- GET  {SERVICE_URL}/trial/info      — Trial limits and upgrade guide
+
 ## Payment
 Protocol: L402 (Bitcoin Lightning Network)
 1. Make request → receive HTTP 402 with Lightning invoice
@@ -516,7 +596,7 @@ def mcp_well_known():
     return {
         "name": "Boltwork",
         "version": "2.0.0",
-        "description": "AI services via Bitcoin Lightning L402: PDF summarisation, code review, web page summarisation, data extraction, translation, table extraction, document comparison, and code explanation.",
+        "description": "AI services via Bitcoin Lightning L402: PDF summarisation, code review, web page summarisation, data extraction, translation, table extraction, document comparison, code explanation, agent memory store/retrieve, and free trial endpoints.",
         "tools": [
             {
                 "name": "summarise_pdf_upload",
@@ -597,6 +677,54 @@ def mcp_well_known():
                 "method": "POST",
                 "price_sats": 500,
                 "payment_protocol": "L402",
+            },
+            {
+                "name": "workflow_run",
+                "description": "Chain multiple Boltwork services in a single call. Describe a pipeline of up to 5 steps, pass outputs between steps using $from references, pay once. Costs 1000 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/workflow/run",
+                "method": "POST",
+                "price_sats": 1000,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "memory_store",
+                "description": "Write persistent key-value memory for your agent. Up to 10 keys per call, 100 keys total per agent_id. Costs 10 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/memory/store",
+                "method": "POST",
+                "price_sats": 10,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "memory_retrieve",
+                "description": "Read stored memory keys for your agent. Omit keys[] to return all. Costs 5 sats via Lightning.",
+                "endpoint": f"{SERVICE_URL}/memory/retrieve",
+                "method": "POST",
+                "price_sats": 5,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "memory_delete",
+                "description": "Delete a single memory key for your agent. Free.",
+                "endpoint": f"{SERVICE_URL}/memory/delete",
+                "method": "POST",
+                "price_sats": 0,
+                "payment_protocol": "L402",
+            },
+            {
+                "name": "trial_review",
+                "description": "Free trial code review with real Claude output. Input capped at 500 chars. Rate limited to 5 calls/hr/IP. No Lightning payment needed.",
+                "endpoint": f"{SERVICE_URL}/trial/review",
+                "method": "POST",
+                "price_sats": 0,
+                "payment_protocol": "none",
+            },
+            {
+                "name": "trial_summarise",
+                "description": "Free trial text summary with real Claude output. Input capped at 1000 chars. Rate limited to 5 calls/hr/IP. No Lightning payment needed.",
+                "endpoint": f"{SERVICE_URL}/trial/summarise",
+                "method": "POST",
+                "price_sats": 0,
+                "payment_protocol": "none",
             },
         ],
         "payment": {
