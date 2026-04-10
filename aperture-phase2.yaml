@@ -1,0 +1,64 @@
+# Aperture config update for Phase 2
+# ====================================
+# SSH into parsebit-lnd and update /root/.lnd/.aperture/aperture.yaml
+#
+# Command to SSH in:
+#   flyctl ssh console --app parsebit-lnd
+#
+# Then edit the config:
+#   vi /root/.lnd/.aperture/aperture.yaml
+#
+# Replace the entire services section with the one below.
+# The key addition is the two new /review/* service entries.
+#
+# After editing, restart aperture:
+#   pkill aperture && aperture --config /root/.lnd/.aperture/aperture.yaml &
+
+listenaddr: "127.0.0.1:8080"
+insecure: true
+
+authenticator:
+  lndhost: "localhost:10009"
+  tlspath: "/root/.lnd/tls.cert"
+  macdir: "/root/.lnd/data/chain/bitcoin/mainnet/"
+
+# -----------------------------------------------------------------------
+# Existing summarise services (UNCHANGED)
+# -----------------------------------------------------------------------
+services:
+  - hostregexp: 'parsebit-lnd.fly.dev'
+    pathregexp: '^/summarise/upload'
+    address: "parsebit.fly.dev"
+    protocol: https
+    price: 500
+
+  - hostregexp: 'parsebit-lnd.fly.dev'
+    pathregexp: '^/summarise/url'
+    address: "parsebit.fly.dev"
+    protocol: https
+    price: 500
+
+# -----------------------------------------------------------------------
+# Phase 2: New code review services
+# -----------------------------------------------------------------------
+  - hostregexp: 'parsebit-lnd.fly.dev'
+    pathregexp: '^/review/code'
+    address: "parsebit.fly.dev"
+    protocol: https
+    price: 2000
+
+  - hostregexp: 'parsebit-lnd.fly.dev'
+    pathregexp: '^/review/url'
+    address: "parsebit.fly.dev"
+    protocol: https
+    price: 2000
+
+# -----------------------------------------------------------------------
+# Free endpoints (no payment required) — not listed in services above
+# so Aperture passes them through without a 402.
+# These work because Aperture only gates paths that match a service entry:
+#   /health
+#   /agent-spec.md
+#   /.well-known/l402.json
+#   /.well-known/agent.json
+# -----------------------------------------------------------------------

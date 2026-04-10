@@ -1,0 +1,38 @@
+listenaddr: "0.0.0.0:8081"
+debuglevel: "info"
+autocert: false
+insecure: false
+servername: "parsebit-aperture.fly.dev"
+
+authenticator:
+  network: "mainnet"
+  lndhost: "parsebit-lnd.internal:10009"
+  tlspath: "/root/.lnd/tls.cert"
+  macdir: "/root/.lnd/data/chain/bitcoin/mainnet/"
+  disable: false
+
+dbbackend: "sqlite"
+sqlite:
+  dbfile: "/root/.aperture/aperture.db"
+
+services:
+  - name: "summarise-upload"
+    hostregexp: '.*'
+    pathregexp: '^/summarise/upload.*$'
+    address: "parsebit.internal:8080"
+    protocol: http
+    price: 50
+
+  - name: "summarise-url"
+    hostregexp: '.*'
+    pathregexp: '^/summarise/url.*$'
+    address: "parsebit.internal:8080"
+    protocol: http
+    price: 50
+
+  - name: "public"
+    hostregexp: '.*'
+    pathregexp: '^/.*$'
+    address: "parsebit.internal:8080"
+    protocol: http
+    price: 0

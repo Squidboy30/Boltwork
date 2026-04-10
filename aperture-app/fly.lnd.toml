@@ -1,0 +1,49 @@
+app = 'parsebit-lnd'
+primary_region = 'lhr'
+
+[build]
+  image = 'lightninglabs/lnd:v0.18.2-beta'
+
+[mounts]
+  source = 'lnd_data'
+  destination = '/root/.lnd'
+
+[processes]
+  app = "--bitcoin.active --bitcoin.mainnet --bitcoin.node=neutrino --neutrino.connect=btcd-mainnet.lightning.computer:10009 --restlisten=0.0.0.0:8080 --rpclisten=0.0.0.0:10009 --listen=0.0.0.0:9735 --alias=parsebit --tlsextraip=0.0.0.0 --fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json --noseedbackup"
+
+[[services]]
+  processes = ["app"]
+  internal_port = 9735
+  protocol = 'tcp'
+  [[services.ports]]
+    port = 9735
+
+[[services]]
+  processes = ["app"]
+  internal_port = 8080
+  protocol = 'tcp'
+  [[services.ports]]
+    port = 8080
+
+[[services]]
+  processes = ["app"]
+  internal_port = 10009
+  protocol = 'tcp'
+  [[services.ports]]
+    port = 10009
+
+[[services]]
+  processes = ["app"]
+  internal_port = 8081
+  protocol = 'tcp'
+  [[services.ports]]
+    handlers = ['tls', 'http']
+    port = 443
+  [[services.ports]]
+    handlers = ['http']
+    port = 80
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1

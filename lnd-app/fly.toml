@@ -1,0 +1,30 @@
+app = 'parsebit-lnd'
+primary_region = 'lhr'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[mounts]
+  source = 'lnd_data'
+  destination = '/root/.lnd'
+
+[[services]]
+  internal_port = 8079
+  protocol = 'tcp'
+  [[services.ports]]
+    handlers = ['tls', 'http']
+    port = 443
+  [[services.ports]]
+    handlers = ['http']
+    port = 80
+
+[[services]]
+  internal_port = 9735
+  protocol = 'tcp'
+  [[services.ports]]
+    port = 9735
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

@@ -1,0 +1,8 @@
+FROM lightninglabs/lnd:v0.18.2-beta
+
+COPY lnd.conf /root/.lnd/lnd.conf
+
+EXPOSE 9735 10009 8080
+
+ENTRYPOINT ["/bin/lnd"]
+CMD ["--configfile=/root/.lnd/lnd.conf"]

@@ -1,0 +1,9 @@
+FROM lightninglabs/aperture:latest
+
+COPY aperture.yaml /root/.aperture/aperture.yaml
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Override whatever entrypoint/cmd the aperture image uses
+ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]
+CMD []

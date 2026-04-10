@@ -1,0 +1,23 @@
+app = "parsebit"
+primary_region = "lhr"
+
+[build]
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[dnsconfig]
+  nameservers = ["8.8.8.8", "8.8.4.4"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[mounts]]
+  source = "boltwork_data"
+  destination = "/data"

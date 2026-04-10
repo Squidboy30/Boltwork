@@ -1,0 +1,50 @@
+listenaddr: "127.0.0.1:8080"
+debuglevel: "info"
+autocert: false
+insecure: true
+authenticator:
+  network: "mainnet"
+  lndhost: "localhost:10009"
+  tlspath: "/root/.lnd/tls.cert"
+  macdir: "/root/.lnd/data/chain/bitcoin/mainnet/"
+  disable: false
+dbbackend: "sqlite"
+sqlite:
+  dbfile: "/root/.lnd/.aperture/aperture.db"
+services:
+  - name: well-known
+    hostregexp: parsebit-lnd.fly.dev
+    pathregexp: ^/.well-known/.*
+    address: parsebit.fly.dev
+    protocol: https
+    price: 0
+  - name: summarise-upload
+    hostregexp: parsebit-lnd.fly.dev
+    pathregexp: ^/summarise/upload.*
+    address: parsebit.fly.dev
+    protocol: https
+    price: 50
+  - name: summarise-url
+    hostregexp: parsebit-lnd.fly.dev
+    pathregexp: ^/summarise/url.*
+    address: parsebit.fly.dev
+    protocol: https
+    price: 50
+  - name: review-code
+    hostregexp: parsebit-lnd.fly.dev
+    pathregexp: ^/review/code.*
+    address: parsebit.fly.dev
+    protocol: https
+    price: 2000
+  - name: review-url
+    hostregexp: parsebit-lnd.fly.dev
+    pathregexp: ^/review/url.*
+    address: parsebit.fly.dev
+    protocol: https
+    price: 2000
+  - name: public
+    hostregexp: parsebit-lnd.fly.dev
+    pathregexp: ^/.*
+    address: parsebit.fly.dev
+    protocol: https
+    price: 0

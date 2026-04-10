@@ -1,0 +1,20 @@
+app = 'parsebit-aperture'
+primary_region = 'lhr'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[[services]]
+  internal_port = 8081
+  protocol = 'tcp'
+  [[services.ports]]
+    handlers = ['tls', 'http']
+    port = 443
+  [[services.ports]]
+    handlers = ['http']
+    port = 80
+
+[[vm]]
+  memory = '256mb'
+  cpu_kind = 'shared'
+  cpus = 1
