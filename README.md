@@ -10,6 +10,8 @@ https://parsebit.fly.dev
 ```
 
 ## Services
+
+### Paid (L402 — Bitcoin Lightning)
 | Service | Endpoint | Price |
 |---------|----------|-------|
 | PDF Summarisation (upload) | `POST /summarise/upload` | 500 sats |
@@ -19,23 +21,59 @@ https://parsebit.fly.dev
 | Web Page Summarisation | `POST /extract/webpage` | 100 sats |
 | PDF Data Extraction | `POST /extract/data` | 200 sats |
 | Translation (24 languages) | `POST /translate` | 150 sats |
+| Table Extraction from PDF | `POST /analyse/tables` | 300 sats |
+| Document Comparison | `POST /analyse/compare` | 500 sats |
+| Code Explanation | `POST /analyse/explain` | 500 sats |
+| Agent Memory Write | `POST /memory/store` | 10 sats |
+| Agent Memory Read | `POST /memory/retrieve` | 5 sats |
 
-## Quick test
+### Free (no payment required)
+| Service | Endpoint | Notes |
+|---------|----------|-------|
+| Trial Code Review | `POST /trial/review` | Real Claude output, 500 char cap, 5 calls/hr/IP |
+| Trial Text Summary | `POST /trial/summarise` | Real Claude output, 1000 char cap, 5 calls/hr/IP |
+| Trial Info | `GET /trial/info` | Limits and upgrade guide |
+| Memory Delete | `POST /memory/delete` | Delete a stored key |
+| Memory Info | `GET /memory/info` | Limits and pricing |
+
+## Quick start — no Lightning required
+
+Try the service instantly with the free trial endpoint:
+
 ```bash
-curl -X POST https://parsebit.fly.dev/summarise/url \
+curl -X POST https://parsebit.fly.dev/trial/review \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://bitcoin.org/bitcoin.pdf"}'
+  -d '{"code": "def add(a, b): return a + b"}'
 ```
-Returns `HTTP 402 Payment Required` with a Lightning invoice. Pay it, retry with credentials, get your result.
+
+Returns a real Claude code review with no payment needed. When you're ready to remove the caps, upgrade to the paid endpoint via L402.
 
 ## Payment flow (L402)
 
 ```
-1. POST /extract/webpage        →  HTTP 402 + Lightning invoice (100 sats)
+1. POST /review/code            →  HTTP 402 + Lightning invoice (2000 sats)
 2. Pay invoice via any Lightning wallet
-3. POST /extract/webpage        →  HTTP 200 + JSON result
-Authorization: L402 <macaroon>:<preimage>
+3. POST /review/code            →  HTTP 200 + JSON result
+   Authorization: L402 <macaroon>:<preimage>
 ```
+
+## Agent Memory
+
+Agents can persist structured context across sessions — no accounts needed. Keyed by a caller-supplied `agent_id`.
+
+```bash
+# Write
+curl -X POST https://parsebit.fly.dev/memory/store \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "my-agent", "entries": {"last_file": "main.py", "status": "ok"}}'
+
+# Read back
+curl -X POST https://parsebit.fly.dev/memory/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "my-agent"}'
+```
+
+Limits: 100 keys per agent, 128 char keys, 4096 char values, 10 keys per write call. Backed by SQLite on a persistent Fly.io volume.
 
 ## Response formats
 
@@ -65,6 +103,19 @@ Authorization: L402 <macaroon>:<preimage>
   "strengths": ["what the code does well"],
   "recommended_actions": ["prioritised fix list"],
   "_meta": {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-6", "truncated": false}
+}
+```
+
+### Trial Review (free, capped)
+```json
+{
+  "language": "python",
+  "overall_score": 6,
+  "summary": "1-2 sentence assessment",
+  "top_issues": [{"severity": "low", "description": "...", "suggestion": "..."}],
+  "strengths": ["one genuine strength if present"],
+  "trial_note": "This is a capped trial review (500 char limit)...",
+  "_meta": {"tier": "trial", "input_truncated": false, "rate_limit_remaining": 4, "upgrade_url": "..."}
 }
 ```
 
@@ -109,6 +160,31 @@ Authorization: L402 <macaroon>:<preimage>
 }
 ```
 
+### Agent Memory Store
+```json
+{
+  "status": "ok",
+  "agent_id": "my-agent",
+  "keys_written": ["last_file", "status"],
+  "written_at": "2026-04-10T13:05:33Z",
+  "keys_in_store": 2,
+  "quota_remaining": 98,
+  "_meta": {"tier": "paid", "price_sats": 10}
+}
+```
+
+### Agent Memory Retrieve
+```json
+{
+  "agent_id": "my-agent",
+  "entries": {"last_file": "main.py", "status": "ok"},
+  "updated_at": {"last_file": "2026-04-10T13:05:33Z", "status": "2026-04-10T13:05:33Z"},
+  "keys_found": 2,
+  "keys_requested": null,
+  "_meta": {"tier": "paid", "price_sats": 5}
+}
+```
+
 ## Agent discovery
 Boltwork is discoverable by any L402-compatible agent:
 - Agent spec: `https://parsebit.fly.dev/agent-spec.md`
@@ -122,7 +198,8 @@ Boltwork is discoverable by any L402-compatible agent:
 - **FastAPI** — API framework
 - **Claude Sonnet 4.6** — AI analysis
 - **pdfplumber** — PDF text extraction
-- **Fly.io** — Hosting (London region)
+- **SQLite** — Agent memory persistence
+- **Fly.io** — Hosting (London region, persistent volume for memory DB)
 - **LND + Aperture** — Lightning L402 payment layer
 - **ACINQ** — Lightning channel (400k sats)
 
@@ -140,7 +217,8 @@ uvicorn main:app --reload
 ## Data & privacy
 - Documents processed on Fly.io servers in London (UK)
 - Text sent to Anthropic's API — not used for training by default
-- No content stored permanently
+- No document content stored permanently
+- Agent memory keys stored on Fly.io volume — delete any key at any time via `POST /memory/delete`
 
 ---
 By [Cracked Minds](https://crackedminds.co.uk) · MIT Licence
