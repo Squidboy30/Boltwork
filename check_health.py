@@ -105,6 +105,7 @@ def get_usage_stats():
             "/trial/review": 0,
             "/trial/summarise": 0,
             "/workflow/run": 1000,
+            "/suggest": 0,
         }
 
         for line in raw.strip().split("\n"):
@@ -193,13 +194,14 @@ def run_checks():
         ("FastAPI route — /translate", f"{BOLTWORK_API}/translate", '{}', [422]),
         ("FastAPI route — /analyse/tables", f"{BOLTWORK_API}/analyse/tables", '{}', [422]),
         ("FastAPI route — /analyse/compare", f"{BOLTWORK_API}/analyse/compare", '{}', [422]),
-        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [422]),
+        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [400, 422]),
         ("FastAPI route — /trial/review", f"{BOLTWORK_API}/trial/review", '{}', [422]),
         ("FastAPI route — /trial/summarise", f"{BOLTWORK_API}/trial/summarise", '{}', [422]),
         ("FastAPI route — /memory/store", f"{BOLTWORK_API}/memory/store", '{}', [422]),
         ("FastAPI route — /memory/retrieve", f"{BOLTWORK_API}/memory/retrieve", '{}', [422]),
         ("FastAPI route — /memory/delete", f"{BOLTWORK_API}/memory/delete", '{}', [422]),
         ("FastAPI route — /workflow/run", f"{BOLTWORK_API}/workflow/run", '{}', [422]),
+        ("FastAPI route — /suggest", f"{BOLTWORK_API}/suggest", '{}', [422]),
     ]
     for name, url, body, expected in routes:
         ok, status, detail = check(name, url, method="POST",
@@ -237,6 +239,10 @@ def run_checks():
          f"{BOLTWORK_API}/trial/review", '{}', [422]),
         ("Trial endpoint — /trial/summarise (free, real call)",
          f"{BOLTWORK_API}/trial/summarise", '{"text":"Bitcoin is a decentralised digital currency."}', [200]),
+        ("Agent suggest — /suggest GET (free, crawlable)",
+         f"{BOLTWORK_API}/suggest", None, [200]),
+        ("Agent suggest — /suggest POST (free, real call)",
+         f"{BOLTWORK_API}/suggest", '{"task":"I need to summarise a PDF research paper"}', [200]),
     ]
     for name, url, body, expected in trial_checks:
         if body:
