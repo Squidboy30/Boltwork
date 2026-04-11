@@ -194,7 +194,7 @@ def run_checks():
         ("FastAPI route — /translate", f"{BOLTWORK_API}/translate", '{}', [422]),
         ("FastAPI route — /analyse/tables", f"{BOLTWORK_API}/analyse/tables", '{}', [422]),
         ("FastAPI route — /analyse/compare", f"{BOLTWORK_API}/analyse/compare", '{}', [422]),
-        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [400, 422]),
+        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [422]),
         ("FastAPI route — /trial/review", f"{BOLTWORK_API}/trial/review", '{}', [422]),
         ("FastAPI route — /trial/summarise", f"{BOLTWORK_API}/trial/summarise", '{}', [422]),
         ("FastAPI route — /memory/store", f"{BOLTWORK_API}/memory/store", '{}', [422]),
