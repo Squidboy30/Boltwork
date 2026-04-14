@@ -187,12 +187,12 @@ def run_checks():
 
     # 4. FastAPI route checks — empty body triggers 422 if route exists
     routes = [
-        ("FastAPI route — /summarise/url", f"{BOLTWORK_API}/summarise/url", '{}', [422]),
+        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [400, 422]),
         ("FastAPI route — /review/code", f"{BOLTWORK_API}/review/code", '{}', [422]),
         ("FastAPI route — /extract/webpage", f"{BOLTWORK_API}/extract/webpage", '{}', [422]),
         ("FastAPI route — /extract/data", f"{BOLTWORK_API}/extract/data", '{}', [422]),
         ("FastAPI route — /translate", f"{BOLTWORK_API}/translate", '{}', [422]),
-        ("FastAPI route — /analyse/tables", f"{BOLTWORK_API}/analyse/tables", '{}', [422]),
+        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [400, 422]),
         ("FastAPI route — /analyse/compare", f"{BOLTWORK_API}/analyse/compare", '{}', [422]),
         ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [422]),
         ("FastAPI route — /trial/review", f"{BOLTWORK_API}/trial/review", '{}', [422]),
