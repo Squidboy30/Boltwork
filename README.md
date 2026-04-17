@@ -1,85 +1,57 @@
-# Boltwork
-**Autonomous agent-native AI services via Bitcoin Lightning.**
-
+Boltwork
+Autonomous agent-native AI services via Bitcoin Lightning.
 Boltwork is a pay-per-call API built for AI agents. Agents discover the service, pay a Lightning invoice, and get results back — no accounts, no API keys, no subscriptions. Fully autonomous machine-to-machine.
-
-## Live API
-
-```
-https://parsebit.fly.dev
-```
-
-## Services
-
-### Paid (L402 — Bitcoin Lightning)
-| Service | Endpoint | Price |
-|---------|----------|-------|
-| PDF Summarisation (upload) | `POST /summarise/upload` | 500 sats |
-| PDF Summarisation (URL) | `POST /summarise/url` | 500 sats |
-| Code Review (direct) | `POST /review/code` | 2000 sats |
-| Code Review (URL) | `POST /review/url` | 2000 sats |
-| Web Page Summarisation | `POST /extract/webpage` | 100 sats |
-| PDF Data Extraction | `POST /extract/data` | 200 sats |
-| Translation (24 languages) | `POST /translate` | 150 sats |
-| Table Extraction from PDF | `POST /analyse/tables` | 300 sats |
-| Document Comparison | `POST /analyse/compare` | 500 sats |
-| Code Explanation | `POST /analyse/explain` | 500 sats |
-| Agent Memory Write | `POST /memory/store` | 10 sats |
-| Agent Memory Read | `POST /memory/retrieve` | 5 sats |
-
-### Free (no payment required)
-| Service | Endpoint | Notes |
-|---------|----------|-------|
-| Trial Code Review | `POST /trial/review` | Real Claude output, 500 char cap, 5 calls/hr/IP |
-| Trial Text Summary | `POST /trial/summarise` | Real Claude output, 1000 char cap, 5 calls/hr/IP |
-| Trial Info | `GET /trial/info` | Limits and upgrade guide |
-| Memory Delete | `POST /memory/delete` | Delete a stored key |
-| Memory Info | `GET /memory/info` | Limits and pricing |
-
-## Quick start — no Lightning required
-
-Try the service instantly with the free trial endpoint:
-
-```bash
-curl -X POST https://parsebit.fly.dev/trial/review \
+Live Endpoints
+AppURLPurposeAPIhttps://parsebit.fly.devFastAPI — all AI servicesGatewayhttps://parsebit-lnd.fly.devL402 payment layer (LND + Aperture)Landing pagehttps://crackedminds.co.uk/gatewayGateway-as-a-service productDashboardhttps://crackedminds.co.uk/gateway/dashboardLive admin metrics
+Services
+ServiceEndpointPricePDF Summarisation (upload)POST /summarise/upload500 satsPDF Summarisation (URL)POST /summarise/url500 satsCode Review (direct)POST /review/code2000 satsCode Review (URL)POST /review/url2000 satsWeb Page SummarisationPOST /extract/webpage100 satsPDF Data ExtractionPOST /extract/data200 satsTranslation (24 languages)POST /translate150 satsTable ExtractionPOST /analyse/tables300 satsDocument ComparisonPOST /analyse/compare500 satsCode ExplanationPOST /analyse/explain500 satsWorkflow PipelinePOST /workflow/run1000 satsAgent Memory WritePOST /memory/store10 satsAgent Memory ReadPOST /memory/retrieve5 satsAgent Memory DeletePOST /memory/deletefreeAgent SuggestPOST /suggestfreeTrial Code ReviewPOST /trial/reviewfree (rate limited)Trial SummarisePOST /trial/summarisefree (rate limited)
+Quick test
+bashcurl -X POST https://parsebit-lnd.fly.dev/extract/webpage \
   -H "Content-Type: application/json" \
-  -d '{"code": "def add(a, b): return a + b"}'
-```
+  -d '{"url": "https://example.com"}'
+Returns HTTP 402 Payment Required with a Lightning invoice. Pay it, retry with credentials, get your result.
+Payment flow (L402)
+1. POST https://parsebit-lnd.fly.dev/extract/webpage
+   → HTTP 402 + WWW-Authenticate: L402 macaroon="...", invoice="lnbc..."
 
-Returns a real Claude code review with no payment needed. When you're ready to remove the caps, upgrade to the paid endpoint via L402.
+2. Pay the Lightning invoice with any wallet (Strike, Phoenix, Alby etc.)
 
-## Payment flow (L402)
-
-```
-1. POST /review/code            →  HTTP 402 + Lightning invoice (2000 sats)
-2. Pay invoice via any Lightning wallet
-3. POST /review/code            →  HTTP 200 + JSON result
+3. Retry with preimage:
    Authorization: L402 <macaroon>:<preimage>
-```
 
-## Agent Memory
+4. → HTTP 200 + JSON result
+Token reuse: A valid token+preimage pair can be reused for subsequent requests to the same endpoint — clients don't need to re-pay on retry. Tokens are scoped to a specific service and cannot be used across endpoints.
+Invoice expiry: 24 hours (Aperture default).
+Architecture
+Two separate Fly.io apps:
+parsebit.fly.dev          parsebit-lnd.fly.dev
+─────────────────         ──────────────────────────
+FastAPI (port 8000)       nginx (port 8079, public)
+SQLite (/data/)      ←── Aperture (port 8080, internal)
+                          LND (ports 9735/10009/8082)
+                          supervisord (manages Aperture)
+                          config-watcher (auto-provisions customers)
+Important: parsebit-lnd is entirely separate from parsebit. nginx and Aperture configs must be edited via fly ssh console -a parsebit-lnd. Changes to the main repo have no effect on the Lightning gateway.
+Gateway-as-a-Service
+The L402 payment infrastructure is packaged as a managed product at crackedminds.co.uk/gateway.
 
-Agents can persist structured context across sessions — no accounts needed. Keyed by a caller-supplied `agent_id`.
+Developers register their API and receive a gateway URL
+Config watcher auto-provisions Aperture rules within 30 seconds
+2% of transaction volume, no monthly fee, no minimum
+Fee baked into Aperture price (price × 1.02, rounded up)
+Billed monthly above 10,000 sat threshold
 
-```bash
-# Write
-curl -X POST https://parsebit.fly.dev/memory/store \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "my-agent", "entries": {"last_file": "main.py", "status": "ok"}}'
+Lightning Node
 
-# Read back
-curl -X POST https://parsebit.fly.dev/memory/retrieve \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "my-agent"}'
-```
+Pubkey: 0383e0f6561bde4045994f99fdbcad4de8b260554b7f299be42e842f245751e7ec
+Alias: boltwork
+Address: 137.66.2.169:9735
+Channel: 1 channel with ACINQ, 400,000 sat capacity
+Inbound liquidity: ~49,848 sats
 
-Limits: 100 keys per agent, 128 char keys, 4096 char values, 10 keys per write call. Backed by SQLite on a persistent Fly.io volume.
-
-## Response formats
-
-### PDF Summarisation
-```json
-{
+Response formats
+PDF Summarisation
+json{
   "title": "Document title or null",
   "summary": "2-3 sentence plain-English summary",
   "key_points": ["Point one", "Point two", "Point three"],
@@ -89,11 +61,8 @@ Limits: 100 keys per agent, 128 char keys, 4096 char values, 10 keys per write c
   "topics": ["topic1", "topic2"],
   "_meta": {"input_tokens": 235, "output_tokens": 191, "model": "claude-sonnet-4-6"}
 }
-```
-
-### Code Review
-```json
-{
+Code Review
+json{
   "language": "python",
   "overall_score": 7,
   "summary": "2-3 sentence assessment",
@@ -104,24 +73,8 @@ Limits: 100 keys per agent, 128 char keys, 4096 char values, 10 keys per write c
   "recommended_actions": ["prioritised fix list"],
   "_meta": {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-6", "truncated": false}
 }
-```
-
-### Trial Review (free, capped)
-```json
-{
-  "language": "python",
-  "overall_score": 6,
-  "summary": "1-2 sentence assessment",
-  "top_issues": [{"severity": "low", "description": "...", "suggestion": "..."}],
-  "strengths": ["one genuine strength if present"],
-  "trial_note": "This is a capped trial review (500 char limit)...",
-  "_meta": {"tier": "trial", "input_truncated": false, "rate_limit_remaining": 4, "upgrade_url": "..."}
-}
-```
-
-### Web Page Summarisation
-```json
-{
+Web Page Summarisation
+json{
   "title": "Page title",
   "summary": "2-3 sentence summary",
   "key_points": ["point 1", "point 2"],
@@ -131,11 +84,8 @@ Limits: 100 keys per agent, 128 char keys, 4096 char values, 10 keys per write c
   "topics": ["topic1", "topic2"],
   "_meta": {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-6", "url": "..."}
 }
-```
-
-### PDF Data Extraction
-```json
-{
+PDF Data Extraction
+json{
   "document_type": "invoice|contract|report|form|receipt|other",
   "dates": [{"label": "Invoice Date", "value": "2024-01-15"}],
   "parties": [{"role": "Vendor", "name": "Acme Corp", "address": null}],
@@ -146,11 +96,8 @@ Limits: 100 keys per agent, 128 char keys, 4096 char values, 10 keys per write c
   "summary": "1-2 sentence description",
   "_meta": {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-6"}
 }
-```
-
-### Translation
-```json
-{
+Translation
+json{
   "source_language": "english",
   "target_language": "spanish",
   "translated_text": "the full translated text",
@@ -158,67 +105,51 @@ Limits: 100 keys per agent, 128 char keys, 4096 char values, 10 keys per write c
   "notes": "any translation notes or null",
   "_meta": {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-6"}
 }
-```
-
-### Agent Memory Store
-```json
-{
-  "status": "ok",
-  "agent_id": "my-agent",
-  "keys_written": ["last_file", "status"],
-  "written_at": "2026-04-10T13:05:33Z",
-  "keys_in_store": 2,
-  "quota_remaining": 98,
-  "_meta": {"tier": "paid", "price_sats": 10}
-}
-```
-
-### Agent Memory Retrieve
-```json
-{
-  "agent_id": "my-agent",
-  "entries": {"last_file": "main.py", "status": "ok"},
-  "updated_at": {"last_file": "2026-04-10T13:05:33Z", "status": "2026-04-10T13:05:33Z"},
-  "keys_found": 2,
-  "keys_requested": null,
-  "_meta": {"tier": "paid", "price_sats": 5}
-}
-```
-
-## Agent discovery
+Agent discovery
 Boltwork is discoverable by any L402-compatible agent:
-- Agent spec: `https://parsebit.fly.dev/agent-spec.md`
-- L402 manifest: `https://parsebit.fly.dev/.well-known/l402.json`
-- MCP discovery: `https://parsebit.fly.dev/.well-known/mcp.json`
-- AI plugin: `https://parsebit.fly.dev/.well-known/ai-plugin.json`
-- LLMs.txt: `https://parsebit.fly.dev/llms.txt`
-- Listed on [402 Index](https://402index.io)
 
-## Tech stack
-- **FastAPI** — API framework
-- **Claude Sonnet 4.6** — AI analysis
-- **pdfplumber** — PDF text extraction
-- **SQLite** — Agent memory persistence
-- **Fly.io** — Hosting (London region, persistent volume for memory DB)
-- **LND + Aperture** — Lightning L402 payment layer
-- **ACINQ** — Lightning channel (400k sats)
+Agent spec: https://parsebit.fly.dev/agent-spec.md
+L402 manifest: https://parsebit.fly.dev/.well-known/l402.json
+MCP discovery: https://parsebit.fly.dev/.well-known/mcp.json
+AI plugin: https://parsebit.fly.dev/.well-known/ai-plugin.json
+LLMs.txt: https://parsebit.fly.dev/llms.txt
+Listed on 402 Index
+Gateway also serves: https://parsebit-lnd.fly.dev/.well-known/l402.json
 
-## Local development
-```bash
-git clone https://github.com/Squidboy30/Boltwork
+Tech stack
+
+FastAPI — API framework
+Claude Sonnet 4.6 — AI analysis
+pdfplumber — PDF text extraction
+Fly.io — Hosting (London, lhr region)
+LND + Aperture — Lightning L402 payment layer
+supervisord — Process management for Aperture on parsebit-lnd
+config-watcher — Auto-provisions Aperture config from gateway DB
+SQLite — Gateway DB at /data/gateway.db, Aperture DB at /root/.lnd/.aperture/aperture.db
+ACINQ — Lightning channel peer (400k sats)
+nginx — Reverse proxy on parsebit-lnd, serves static well-known files
+
+Key secrets
+SecretAppPurposeANTHROPIC_API_KEYparsebitClaude APIGATEWAY_ADMIN_TOKENbothAdmin dashboard authFLY_API_TOKENparsebitFly logs API for dashboardSERVICE_URLparsebitSelf-reference URL
+Local development
+bashgit clone https://github.com/Squidboy30/Boltwork
 cd Boltwork
 python -m venv venv
 venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 set ANTHROPIC_API_KEY=your-key-here
 uvicorn main:app --reload
-```
+Distribution
 
-## Data & privacy
-- Documents processed on Fly.io servers in London (UK)
-- Text sent to Anthropic's API — not used for training by default
-- No document content stored permanently
-- Agent memory keys stored on Fly.io volume — delete any key at any time via `POST /memory/delete`
+Stacker News: https://stacker.news/items/1473016/r/Squidboy30 — live, receiving traffic
+HN Show HN: post written, pending inbound liquidity before posting
+Reddit: post written, pending karma build before posting
 
----
-By [Cracked Minds](https://crackedminds.co.uk) · MIT Licence
+Data & privacy
+
+Documents processed on Fly.io servers in London (UK)
+Text sent to Anthropic's API — not used for training by default
+No content stored permanently
+
+
+By Cracked Minds · MIT Licence
