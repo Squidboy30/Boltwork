@@ -5,8 +5,8 @@ Provides live metrics for the admin dashboard.
 
 Endpoints:
   GET /admin/metrics   — Live snapshot: LND balance, recent invoices, gateway health
-  GET /admin/logs      — Recent Aperture log lines
-  GET /admin/invoices  — Recent invoice activity
+  GET /admin/lnd       — Live Lightning node stats: channels, balances, peers
+  GET /admin/health-simple — Quick health check (no auth)
 
 Protected by ADMIN_TOKEN header.
 """
@@ -39,7 +39,6 @@ def require_admin(x_admin_token: Optional[str] = Header(None)):
 
 
 async def fetch_fly_logs(app_name: str, minutes: int = 30) -> list[dict]:
-    """Fetch recent logs from Fly.io API."""
     if not FLY_API_TOKEN:
         return []
     try:
@@ -65,7 +64,6 @@ async def fetch_fly_logs(app_name: str, minutes: int = 30) -> list[dict]:
 
 
 async def get_gateway_health() -> dict:
-    """Check if the L402 gateway is up and returning 402s."""
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             t0 = time.monotonic()
@@ -86,7 +84,6 @@ async def get_gateway_health() -> dict:
 
 
 async def get_parsebit_health() -> dict:
-    """Check if the main API is up."""
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             t0 = time.monotonic()
@@ -102,40 +99,25 @@ async def get_parsebit_health() -> dict:
 
 
 def parse_aperture_logs(logs: list[dict]) -> dict:
-    """Extract metrics from Aperture log lines."""
     requests = []
     errors = []
-    settled = 0
-
     for entry in logs:
         msg = entry.get("message", "") or entry.get("text", "")
         if "PRXY:" not in msg:
             continue
-
         ts = entry.get("timestamp", entry.get("ts", ""))
-
-        if "Authentication failed" in msg:
-            # Extract next log line for the actual request
-            continue
-        elif '"POST' in msg or '"GET' in msg or '"HEAD' in msg or '"PUT' in msg:
-            # Parse request line: METHOD /path HTTP/1.1" "" "user-agent"
+        if '"POST' in msg or '"GET' in msg or '"HEAD' in msg or '"PUT' in msg:
             try:
-                parts = msg.split('"')
+                parts = msg.split('"\')
                 method_path = parts[1] if len(parts) > 1 else ""
                 user_agent = parts[5] if len(parts) > 5 else ""
                 method = method_path.split()[0] if method_path else ""
                 path = method_path.split()[1] if len(method_path.split()) > 1 else ""
-                requests.append({
-                    "ts": ts,
-                    "method": method,
-                    "path": path,
-                    "user_agent": user_agent,
-                })
+                requests.append({"ts": ts, "method": method, "path": path, "user_agent": user_agent})
             except Exception:
                 pass
         elif "Error" in msg or "error" in msg:
             errors.append({"ts": ts, "msg": msg[:120]})
-
     return {
         "total_requests": len(requests),
         "recent_requests": requests[-20:],
@@ -145,38 +127,28 @@ def parse_aperture_logs(logs: list[dict]) -> dict:
 
 
 def parse_boltwork_logs(logs: list[dict]) -> dict:
-    """Extract BOLTWORK_LOG entries from parsebit logs."""
     entries = []
-    total_calls = 0
-    success_calls = 0
-    error_calls = 0
+    total_calls = success_calls = error_calls = 0
     by_endpoint = {}
-
     for entry in logs:
         msg = entry.get("message", "") or entry.get("text", "")
         if "BOLTWORK_LOG" not in msg:
             continue
         try:
-            log_json = msg.split("BOLTWORK_LOG", 1)[1].strip()
-            log = json.loads(log_json)
+            log = json.loads(msg.split("BOLTWORK_LOG", 1)[1].strip())
             entries.append(log)
             total_calls += 1
             status = log.get("status", "")
-            if status == "success":
-                success_calls += 1
-            elif status == "error":
-                error_calls += 1
+            if status == "success": success_calls += 1
+            elif status == "error": error_calls += 1
             ep = log.get("endpoint", "unknown")
             if ep not in by_endpoint:
                 by_endpoint[ep] = {"calls": 0, "success": 0, "errors": 0}
             by_endpoint[ep]["calls"] += 1
-            if status == "success":
-                by_endpoint[ep]["success"] += 1
-            elif status == "error":
-                by_endpoint[ep]["errors"] += 1
+            if status == "success": by_endpoint[ep]["success"] += 1
+            elif status == "error": by_endpoint[ep]["errors"] += 1
         except Exception:
             pass
-
     return {
         "total_calls": total_calls,
         "success_calls": success_calls,
@@ -188,14 +160,6 @@ def parse_boltwork_logs(logs: list[dict]) -> dict:
 
 @router.get("/metrics", dependencies=[Depends(require_admin)])
 async def get_metrics():
-    """
-    Live dashboard metrics. Fetches in parallel:
-    - Gateway health (402 check)
-    - API health
-    - Recent Fly logs (Aperture activity + Boltwork calls)
-    - Invoice stats from gateway DB
-    """
-    # Run health checks and log fetches in parallel
     gateway_health, api_health, lnd_logs, api_logs = await asyncio.gather(
         get_gateway_health(),
         get_parsebit_health(),
@@ -203,21 +167,14 @@ async def get_metrics():
         fetch_fly_logs(FLY_APP_API, minutes=60),
         return_exceptions=True
     )
-
-    # Handle exceptions from gather
-    if isinstance(gateway_health, Exception):
-        gateway_health = {"status": "error", "error": str(gateway_health)}
-    if isinstance(api_health, Exception):
-        api_health = {"status": "error", "error": str(api_health)}
-    if isinstance(lnd_logs, Exception):
-        lnd_logs = []
-    if isinstance(api_logs, Exception):
-        api_logs = []
+    if isinstance(gateway_health, Exception): gateway_health = {"status": "error"}
+    if isinstance(api_health, Exception): api_health = {"status": "error"}
+    if isinstance(lnd_logs, Exception): lnd_logs = []
+    if isinstance(api_logs, Exception): api_logs = []
 
     aperture_stats = parse_aperture_logs(lnd_logs)
     boltwork_stats = parse_boltwork_logs(api_logs)
 
-    # Invoice stats from gateway DB
     invoice_stats = {"settled": 0, "pending": 0, "total_sats": 0}
     try:
         from pathlib import Path
@@ -237,10 +194,7 @@ async def get_metrics():
 
     return {
         "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "health": {
-            "gateway": gateway_health,
-            "api": api_health,
-        },
+        "health": {"gateway": gateway_health, "api": api_health},
         "aperture": aperture_stats,
         "boltwork": boltwork_stats,
         "invoices": invoice_stats,
@@ -250,11 +204,8 @@ async def get_metrics():
 
 @router.get("/health-simple")
 async def health_simple():
-    """Quick health check without auth — for monitoring."""
     gateway, api = await asyncio.gather(
-        get_gateway_health(),
-        get_parsebit_health(),
-        return_exceptions=True
+        get_gateway_health(), get_parsebit_health(), return_exceptions=True
     )
     return {
         "gateway": gateway if not isinstance(gateway, Exception) else {"status": "error"},
@@ -263,13 +214,69 @@ async def health_simple():
     }
 
 
+@router.get("/lnd", dependencies=[Depends(require_admin)])
+async def get_lnd_stats():
+    """Live Lightning node stats: channels, balances, peers, sync status."""
+    LND_REST = os.environ.get("LND_REST_URL", "https://parsebit-lnd.fly.dev:8082")
+    MACAROON = os.environ.get("LND_MACAROON_HEX", "")
 
+    if not MACAROON:
+        return {
+            "error": "LND_MACAROON_HEX not configured",
+            "alias": "boltwork",
+            "synced": None,
+            "active_channels": None,
+            "inactive_channels": None,
+            "num_peers": None,
+            "block_height": None,
+            "channels": [],
+        }
 
+    headers = {"Grpc-Metadata-macaroon": MACAROON}
 
+    async def lnd_get(path: str):
+        try:
+            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
+                r = await client.get(f"{LND_REST}{path}", headers=headers)
+                if r.status_code == 200:
+                    return r.json()
+        except Exception:
+            pass
+        return None
 
+    info, chans = await asyncio.gather(
+        lnd_get("/v1/getinfo"),
+        lnd_get("/v1/channels"),
+        return_exceptions=True
+    )
+    if isinstance(info, Exception): info = None
+    if isinstance(chans, Exception): chans = None
 
+    channels = []
+    if chans and "channels" in chans:
+        for ch in chans["channels"]:
+            channels.append({
+                "active":         ch.get("active", False),
+                "peer_alias":     ch.get("peer_alias", ""),
+                "remote_pubkey":  ch.get("remote_pubkey", ""),
+                "capacity":       int(ch.get("capacity", 0)),
+                "local_balance":  int(ch.get("local_balance", 0)),
+                "remote_balance": int(ch.get("remote_balance", 0)),
+                "total_sent":     int(ch.get("total_satoshis_sent", 0)),
+                "total_received": int(ch.get("total_satoshis_received", 0)),
+            })
 
-
-
-
-
+    return {
+        "alias":             info.get("alias") if info else "boltwork",
+        "synced":            info.get("synced_to_chain") if info else None,
+        "synced_to_graph":   info.get("synced_to_graph") if info else None,
+        "active_channels":   info.get("num_active_channels") if info else None,
+        "inactive_channels": info.get("num_inactive_channels") if info else None,
+        "num_peers":         info.get("num_peers") if info else None,
+        "block_height":      info.get("block_height") if info else None,
+        "version":           info.get("version", "").split(" ")[0] if info else None,
+        "channels":          channels,
+        "total_inbound":     sum(c["remote_balance"] for c in channels),
+        "total_outbound":    sum(c["local_balance"] for c in channels),
+        "total_capacity":    sum(c["capacity"] for c in channels),
+    }
