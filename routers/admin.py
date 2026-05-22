@@ -4,9 +4,9 @@ Boltwork Admin Dashboard Router
 Provides live metrics for the admin dashboard.
 
 Endpoints:
-  GET /admin/metrics   — Live snapshot: LND balance, recent invoices, gateway health
-  GET /admin/lnd       — Live Lightning node stats: channels, balances, peers
-  GET /admin/health-simple — Quick health check (no auth)
+  GET /admin/metrics      - Live snapshot: gateway health, invoices, API calls
+  GET /admin/lnd          - Live Lightning node stats
+  GET /admin/health-simple - Quick health check (no auth)
 
 Protected by ADMIN_TOKEN header.
 """
@@ -15,12 +15,11 @@ import asyncio
 import json
 import os
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException
-from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -38,7 +37,7 @@ def require_admin(x_admin_token: Optional[str] = Header(None)):
         raise HTTPException(status_code=403, detail="Invalid admin token")
 
 
-async def fetch_fly_logs(app_name: str, minutes: int = 30) -> list[dict]:
+async def fetch_fly_logs(app_name: str, minutes: int = 30) -> list:
     if not FLY_API_TOKEN:
         return []
     try:
@@ -98,7 +97,7 @@ async def get_parsebit_health() -> dict:
         return {"status": "down", "error": str(e)[:80]}
 
 
-def parse_aperture_logs(logs: list[dict]) -> dict:
+def parse_aperture_logs(logs: list) -> dict:
     requests = []
     errors = []
     for entry in logs:
@@ -106,9 +105,10 @@ def parse_aperture_logs(logs: list[dict]) -> dict:
         if "PRXY:" not in msg:
             continue
         ts = entry.get("timestamp", entry.get("ts", ""))
-        if '"POST' in msg or '"GET' in msg or '"HEAD' in msg or '"PUT' in msg:
+        has_method = any(x in msg for x in ['"POST', '"GET', '"HEAD', '"PUT'])
+        if has_method:
             try:
-                parts = msg.split('"\')
+                parts = msg.split('"')
                 method_path = parts[1] if len(parts) > 1 else ""
                 user_agent = parts[5] if len(parts) > 5 else ""
                 method = method_path.split()[0] if method_path else ""
@@ -126,7 +126,7 @@ def parse_aperture_logs(logs: list[dict]) -> dict:
     }
 
 
-def parse_boltwork_logs(logs: list[dict]) -> dict:
+def parse_boltwork_logs(logs: list) -> dict:
     entries = []
     total_calls = success_calls = error_calls = 0
     by_endpoint = {}
@@ -139,14 +139,18 @@ def parse_boltwork_logs(logs: list[dict]) -> dict:
             entries.append(log)
             total_calls += 1
             status = log.get("status", "")
-            if status == "success": success_calls += 1
-            elif status == "error": error_calls += 1
+            if status == "success":
+                success_calls += 1
+            elif status == "error":
+                error_calls += 1
             ep = log.get("endpoint", "unknown")
             if ep not in by_endpoint:
                 by_endpoint[ep] = {"calls": 0, "success": 0, "errors": 0}
             by_endpoint[ep]["calls"] += 1
-            if status == "success": by_endpoint[ep]["success"] += 1
-            elif status == "error": by_endpoint[ep]["errors"] += 1
+            if status == "success":
+                by_endpoint[ep]["success"] += 1
+            elif status == "error":
+                by_endpoint[ep]["errors"] += 1
         except Exception:
             pass
     return {
@@ -167,10 +171,14 @@ async def get_metrics():
         fetch_fly_logs(FLY_APP_API, minutes=60),
         return_exceptions=True
     )
-    if isinstance(gateway_health, Exception): gateway_health = {"status": "error"}
-    if isinstance(api_health, Exception): api_health = {"status": "error"}
-    if isinstance(lnd_logs, Exception): lnd_logs = []
-    if isinstance(api_logs, Exception): api_logs = []
+    if isinstance(gateway_health, Exception):
+        gateway_health = {"status": "error"}
+    if isinstance(api_health, Exception):
+        api_health = {"status": "error"}
+    if isinstance(lnd_logs, Exception):
+        lnd_logs = []
+    if isinstance(api_logs, Exception):
+        api_logs = []
 
     aperture_stats = parse_aperture_logs(lnd_logs)
     boltwork_stats = parse_boltwork_logs(api_logs)
@@ -205,7 +213,9 @@ async def get_metrics():
 @router.get("/health-simple")
 async def health_simple():
     gateway, api = await asyncio.gather(
-        get_gateway_health(), get_parsebit_health(), return_exceptions=True
+        get_gateway_health(),
+        get_parsebit_health(),
+        return_exceptions=True
     )
     return {
         "gateway": gateway if not isinstance(gateway, Exception) else {"status": "error"},
@@ -249,8 +259,10 @@ async def get_lnd_stats():
         lnd_get("/v1/channels"),
         return_exceptions=True
     )
-    if isinstance(info, Exception): info = None
-    if isinstance(chans, Exception): chans = None
+    if isinstance(info, Exception):
+        info = None
+    if isinstance(chans, Exception):
+        chans = None
 
     channels = []
     if chans and "channels" in chans:
