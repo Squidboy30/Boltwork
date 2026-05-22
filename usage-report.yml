@@ -1,0 +1,28 @@
+name: Daily Usage Report
+
+on:
+  schedule:
+    # 8am UK time — UTC+1 in summer (BST), UTC+0 in winter (GMT)
+    # Running at 07:00 UTC covers BST; adjust to 08:00 UTC Nov–Mar if needed
+    - cron: '0 7 * * *'
+  workflow_dispatch:  # allow manual trigger from GitHub Actions UI
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run usage report
+        env:
+          GMAIL_USER:         ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_EMAIL:       ${{ secrets.NOTIFY_EMAIL }}
+          FLY_API_TOKEN:      ${{ secrets.FLY_API_TOKEN }}
+          LOOKBACK_HOURS:     "24"
+        run: python boltwork_usage_report.py
