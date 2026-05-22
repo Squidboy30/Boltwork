@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import anthropic, httpx, pdfplumber
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -13,6 +14,9 @@ from routers.analyse import router as analyse_router
 from routers.trial import router as trial_router
 from routers.memory import router as memory_router
 from routers.workflow import router as workflow_router
+from routers.suggest import router as suggest_router
+from routers.gateway import router as gateway_router
+from routers.admin import router as admin_router
 
 def log_call(endpoint: str, status: str, result: dict = None, error: str = None,
              duration_ms: int = 0, file_size_bytes: int = 0, source_url: str = None):
@@ -83,12 +87,17 @@ app = FastAPI(
     version="2.0.0",
 )
 
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["WWW-Authenticate"])
+
 app.include_router(review_router)
 app.include_router(extract_router)
 app.include_router(analyse_router)
 app.include_router(trial_router)
 app.include_router(memory_router)
 app.include_router(workflow_router)
+app.include_router(suggest_router)
+app.include_router(gateway_router)
+app.include_router(admin_router)
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
@@ -207,6 +216,7 @@ POST {SERVICE_URL}/analyse/explain  - Explain code in plain English (JSON body: 
 - Agent Memory Write: 10 satoshis per call
 - Agent Memory Read: 5 satoshis per call
 - Workflow Pipeline: 1000 satoshis per run
+- Agent Suggest: free (no payment required)
 - Trial endpoints: free (rate-limited, capped input)
 
 No account, signup, or API key required. Any Lightning-capable agent
@@ -240,6 +250,10 @@ POST {SERVICE_URL}/memory/store      - Write key-value pairs for your agent (JSO
 POST {SERVICE_URL}/memory/retrieve   - Read stored keys (JSON body: agent_id, keys[]?)
 POST {SERVICE_URL}/memory/delete     - Delete a key (JSON body: agent_id, key) — free
 GET  {SERVICE_URL}/memory/info       - Memory service info and limits (free)
+
+### Agent Suggest (Free — no payment required)
+POST {SERVICE_URL}/suggest      - Describe a task, get back a service recommendation + pipeline (free)
+GET  {SERVICE_URL}/suggest      - Endpoint info and example inputs (free, crawlable)
 
 ### Trial (Free — no Lightning payment required)
 POST {SERVICE_URL}/trial/review      - Capped code review, 500 char input, 5 calls/hr/IP
@@ -380,6 +394,12 @@ def l402_well_known():
                 "method": "POST",
                 "price_sats": 500,
                 "description": "Explain what code does in plain English",
+            },
+            {
+                "endpoint": "/suggest",
+                "method": "POST",
+                "price_sats": 0,
+                "description": "Describe a task, get back a service recommendation and ready-to-run pipeline (free)",
             },
             {
                 "endpoint": "/workflow/run",
@@ -568,6 +588,11 @@ Boltwork provides pay-per-use AI services accessible to any Lightning-capable ag
 - GET  {SERVICE_URL}/memory/info     — Limits and pricing info (free)
 - Returns: entries dict, updated_at timestamps, quota_remaining
 
+### Agent Suggest — free
+- POST {SERVICE_URL}/suggest — describe a task, get service recommendation + ready-to-run pipeline
+- GET  {SERVICE_URL}/suggest — endpoint info and example inputs (crawlable)
+- No payment, no rate limit — designed for agent discovery
+
 ### Trial (Free — no Lightning payment)
 - POST {SERVICE_URL}/trial/review    — Real code review, 500 char input cap, 5 calls/hr/IP
 - POST {SERVICE_URL}/trial/summarise — Real text summary, 1000 char input cap, 5 calls/hr/IP
@@ -679,6 +704,14 @@ def mcp_well_known():
                 "payment_protocol": "L402",
             },
             {
+                "name": "suggest",
+                "description": "Describe what your agent is trying to do and get back a concrete Boltwork service recommendation plus a ready-to-run workflow pipeline. Free — no Lightning payment required.",
+                "endpoint": f"{SERVICE_URL}/suggest",
+                "method": "POST",
+                "price_sats": 0,
+                "payment_protocol": "none",
+            },
+            {
                 "name": "workflow_run",
                 "description": "Chain multiple Boltwork services in a single call. Describe a pipeline of up to 5 steps, pass outputs between steps using $from references, pay once. Costs 1000 sats via Lightning.",
                 "endpoint": f"{SERVICE_URL}/workflow/run",
@@ -735,3 +768,9 @@ def mcp_well_known():
         "provider": "Cracked Minds",
         "provider_url": "https://crackedminds.co.uk",
     }
+
+
+
+
+
+

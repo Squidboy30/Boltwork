@@ -7,7 +7,6 @@ Endpoints:
   GET /admin/metrics   — Live snapshot: LND balance, recent invoices, gateway health
   GET /admin/logs      — Recent Aperture log lines
   GET /admin/invoices  — Recent invoice activity
-  GET /admin/lnd       — Live Lightning node stats: channels, balances, peers
 
 Protected by ADMIN_TOKEN header.
 """
@@ -106,6 +105,7 @@ def parse_aperture_logs(logs: list[dict]) -> dict:
     """Extract metrics from Aperture log lines."""
     requests = []
     errors = []
+    settled = 0
 
     for entry in logs:
         msg = entry.get("message", "") or entry.get("text", "")
@@ -114,7 +114,11 @@ def parse_aperture_logs(logs: list[dict]) -> dict:
 
         ts = entry.get("timestamp", entry.get("ts", ""))
 
-        if '"POST' in msg or '"GET' in msg or '"HEAD' in msg or '"PUT' in msg:
+        if "Authentication failed" in msg:
+            # Extract next log line for the actual request
+            continue
+        elif '"POST' in msg or '"GET' in msg or '"HEAD' in msg or '"PUT' in msg:
+            # Parse request line: METHOD /path HTTP/1.1" "" "user-agent"
             try:
                 parts = msg.split('"')
                 method_path = parts[1] if len(parts) > 1 else ""
@@ -191,6 +195,7 @@ async def get_metrics():
     - Recent Fly logs (Aperture activity + Boltwork calls)
     - Invoice stats from gateway DB
     """
+    # Run health checks and log fetches in parallel
     gateway_health, api_health, lnd_logs, api_logs = await asyncio.gather(
         get_gateway_health(),
         get_parsebit_health(),
@@ -199,6 +204,7 @@ async def get_metrics():
         return_exceptions=True
     )
 
+    # Handle exceptions from gather
     if isinstance(gateway_health, Exception):
         gateway_health = {"status": "error", "error": str(gateway_health)}
     if isinstance(api_health, Exception):
@@ -211,6 +217,7 @@ async def get_metrics():
     aperture_stats = parse_aperture_logs(lnd_logs)
     boltwork_stats = parse_boltwork_logs(api_logs)
 
+    # Invoice stats from gateway DB
     invoice_stats = {"settled": 0, "pending": 0, "total_sats": 0}
     try:
         from pathlib import Path
@@ -256,73 +263,13 @@ async def health_simple():
     }
 
 
-@router.get("/lnd", dependencies=[Depends(require_admin)])
-async def get_lnd_stats():
-    """
-    Live Lightning node stats: channels, balances, peers, sync status.
-    Calls the LND REST API on parsebit-lnd.
-    """
-    LND_REST = os.environ.get("LND_REST_URL", "https://parsebit-lnd.fly.dev:8082")
-    MACAROON  = os.environ.get("LND_MACAROON_HEX", "")
 
-    if not MACAROON:
-        return {
-            "error": "LND_MACAROON_HEX not configured",
-            "alias": "boltwork",
-            "synced": None,
-            "active_channels": None,
-            "inactive_channels": None,
-            "num_peers": None,
-            "block_height": None,
-            "channels": [],
-        }
 
-    headers = {"Grpc-Metadata-macaroon": MACAROON}
 
-    async def lnd_get(path: str):
-        try:
-            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
-                r = await client.get(f"{LND_REST}{path}", headers=headers)
-                if r.status_code == 200:
-                    return r.json()
-        except Exception:
-            pass
-        return None
 
-    info, chans = await asyncio.gather(
-        lnd_get("/v1/getinfo"),
-        lnd_get("/v1/channels"),
-        return_exceptions=True
-    )
 
-    if isinstance(info, Exception): info = None
-    if isinstance(chans, Exception): chans = None
 
-    channels = []
-    if chans and "channels" in chans:
-        for ch in chans["channels"]:
-            channels.append({
-                "active":         ch.get("active", False),
-                "peer_alias":     ch.get("peer_alias", ""),
-                "remote_pubkey":  ch.get("remote_pubkey", ""),
-                "capacity":       int(ch.get("capacity", 0)),
-                "local_balance":  int(ch.get("local_balance", 0)),
-                "remote_balance": int(ch.get("remote_balance", 0)),
-                "total_sent":     int(ch.get("total_satoshis_sent", 0)),
-                "total_received": int(ch.get("total_satoshis_received", 0)),
-            })
 
-    return {
-        "alias":             info.get("alias") if info else "boltwork",
-        "synced":            info.get("synced_to_chain") if info else None,
-        "synced_to_graph":   info.get("synced_to_graph") if info else None,
-        "active_channels":   info.get("num_active_channels") if info else None,
-        "inactive_channels": info.get("num_inactive_channels") if info else None,
-        "num_peers":         info.get("num_peers") if info else None,
-        "block_height":      info.get("block_height") if info else None,
-        "version":           info.get("version", "").split(" ")[0] if info else None,
-        "channels":          channels,
-        "total_inbound":     sum(c["remote_balance"] for c in channels),
-        "total_outbound":    sum(c["local_balance"] for c in channels),
-        "total_capacity":    sum(c["capacity"] for c in channels),
-    }
+
+
+
