@@ -8,10 +8,10 @@ Supported wallet backends:
   - Phoenixd - self-hosted Lightning node
 
 Flow:
-  1. Request hits L402 gateway → 402 response
+  1. Request hits L402 gateway -> 402 response
   2. Extract macaroon + invoice from WWW-Authenticate header
   3. Pay invoice via configured wallet backend
-  4. Return Authorization header value for retry
+  4. Retry with Authorization: L402 <macaroon>:<preimage>
 """
 
 import os
@@ -30,7 +30,7 @@ def parse_402(www_authenticate: str) -> tuple[str, str]:
     """
     Parse the WWW-Authenticate header from a 402 response.
     Returns (macaroon, invoice).
-    
+
     Header format:
       L402 macaroon="<base64>", invoice="<bolt11>"
     """
@@ -54,10 +54,7 @@ async def pay_invoice_nwc(invoice: str, nwc_string: str) -> str:
     Pay a Lightning invoice via Nostr Wallet Connect.
     Returns the payment preimage as a hex string.
 
-    NWC connection string format:
-      nostr+walletconnect://<pubkey>?relay=<relay_url>&secret=<secret>
-
-    Uses the pynostr-based NWC flow via a lightweight websocket exchange.
+    Compatible with websockets >= 14.x (new asyncio API).
     """
     try:
         from pynostr.key import PrivateKey
@@ -105,11 +102,16 @@ async def pay_invoice_nwc(invoice: str, nwc_string: str) -> str:
     event = dm.to_event()
     event.sign(client_privkey.hex())
 
-    timeout    = 30.0
-    deadline   = asyncio.get_event_loop().time() + timeout
-    preimage   = None
+    timeout  = 30.0
+    preimage = None
 
-    async with websockets.connect(relay_url) as ws:
+    # websockets >= 14 uses connect() as async context manager directly
+    try:
+        connect_fn = websockets.connect
+    except AttributeError:
+        connect_fn = websockets.asyncio.client.connect
+
+    async with connect_fn(relay_url) as ws:
         # Subscribe to responses addressed to us from the wallet
         sub_id  = str(uuid.uuid4())[:8]
         sub_msg = json.dumps([
@@ -122,13 +124,13 @@ async def pay_invoice_nwc(invoice: str, nwc_string: str) -> str:
         await ws.send(json.dumps(["EVENT", event.to_dict()]))
 
         # Wait for response
+        deadline = asyncio.get_event_loop().time() + timeout
         while asyncio.get_event_loop().time() < deadline:
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
                 msg = json.loads(raw)
                 if msg[0] == "EVENT" and msg[1] == sub_id:
                     ev = msg[2]
-                    # Decrypt response
                     dm_resp = EncryptedDirectMessage.from_event_dict(ev)
                     dm_resp.decrypt(client_privkey.hex(), public_key_hex=wallet_pubkey_hex)
                     resp = json.loads(dm_resp.cleartext_content)
@@ -154,9 +156,6 @@ async def pay_invoice_phoenixd(invoice: str, phoenixd_url: str, phoenixd_passwor
     """
     Pay a Lightning invoice via Phoenixd REST API.
     Returns the payment preimage as a hex string.
-
-    phoenixd_url:      e.g. http://localhost:9740
-    phoenixd_password: the HTTP Basic auth password from phoenixd config
     """
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
@@ -184,8 +183,8 @@ async def pay_invoice(invoice: str) -> str:
     Returns the preimage as a hex string.
 
     Reads configuration from environment variables:
-      NWC_CONNECTION_STRING  — use NWC backend
-      PHOENIXD_URL           — use Phoenixd backend (also needs PHOENIXD_PASSWORD)
+      NWC_CONNECTION_STRING  — use NWC backend (Alby, Mutiny, etc.)
+      PHOENIXD_URL           — use Phoenixd backend
       PHOENIXD_PASSWORD      — Phoenixd HTTP Basic auth password
     """
     nwc_string        = os.environ.get("NWC_CONNECTION_STRING", "").strip()
@@ -205,47 +204,38 @@ async def pay_invoice(invoice: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Full L402 request helper — use this from tool handlers
+# Full L402 request helper
 # ---------------------------------------------------------------------------
 
 async def l402_request(
     method: str,
     url: str,
-    gateway_url: str,
     json_body: Optional[dict] = None,
     files: Optional[dict] = None,
 ) -> dict:
     """
     Make an L402-authenticated request.
 
-    1. Sends request to gateway_url (the L402 gateway)
+    1. Sends request to url
     2. If 402, pays the invoice and retries with credentials
     3. Returns the parsed JSON response
-
-    Args:
-        method:      HTTP method ("GET", "POST")
-        url:         The logical endpoint path (e.g. "/summarise/url")
-        gateway_url: Full URL to the L402 gateway endpoint
-        json_body:   JSON request body (for POST)
-        files:       Multipart files (for file upload)
     """
     async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
 
-        # First attempt — expect either 200 or 402
         kwargs = {}
         if json_body is not None:
             kwargs["json"] = json_body
         if files is not None:
             kwargs["files"] = files
 
-        response = await client.request(method, gateway_url, **kwargs)
+        response = await client.request(method, url, **kwargs)
 
         if response.status_code == 200:
             return response.json()
 
         if response.status_code != 402:
             raise RuntimeError(
-                f"Unexpected HTTP {response.status_code} from {gateway_url}: "
+                f"Unexpected HTTP {response.status_code} from {url}: "
                 f"{response.text[:300]}"
             )
 
@@ -260,7 +250,7 @@ async def l402_request(
         # Retry with L402 credentials
         auth_header = f"L402 {macaroon}:{preimage}"
         response2 = await client.request(
-            method, gateway_url,
+            method, url,
             headers={"Authorization": auth_header},
             **kwargs,
         )
