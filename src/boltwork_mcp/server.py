@@ -35,7 +35,7 @@ from boltwork_mcp.payment import l402_request
 # Configuration
 # ---------------------------------------------------------------------------
 
-GATEWAY = os.environ.get("BOLTWORK_GATEWAY", "https://parsebit-lnd.fly.dev")
+GATEWAY = os.environ.get("BOLTWORK_GATEWAY", "https://parsebit.fly.dev")
 
 # ---------------------------------------------------------------------------
 # MCP Server
@@ -47,6 +47,42 @@ app = Server("boltwork")
 @app.list_tools()
 async def list_tools() -> list[types.Tool]:
     return [
+
+        # ── Free Trials (no payment required) ────────────────────────────
+        types.Tool(
+            name="trial_summarise",
+            description=(
+                "FREE trial — summarise a short piece of text (max ~500 words). "
+                "No Lightning wallet needed. "
+                "Use this to try Boltwork before setting up payments. "
+                "For full document summarisation use summarise_pdf or summarise_webpage."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to summarise (max ~500 words)"},
+                },
+                "required": ["text"],
+            },
+        ),
+
+        types.Tool(
+            name="trial_review_code",
+            description=(
+                "FREE trial — review a short code snippet (max ~50 lines). "
+                "No Lightning wallet needed. "
+                "Use this to try Boltwork before setting up payments. "
+                "For full code review use review_code or review_code_url."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "code":     {"type": "string", "description": "Code snippet to review (max ~50 lines)"},
+                    "language": {"type": "string", "description": "Language hint (optional)"},
+                },
+                "required": ["code"],
+            },
+        ),
 
         # ── Summarisation ────────────────────────────────────────────────
         types.Tool(
@@ -160,7 +196,7 @@ async def list_tools() -> list[types.Tool]:
                 "properties": {
                     "text":            {"type": "string", "description": "Text to translate (provide either text or url)"},
                     "url":             {"type": "string", "description": "URL of document to translate (provide either text or url)"},
-                    "target_language": {"type": "string", "description": "Target language (e.g. 'spanish', 'french', 'japanese')"},
+                    "target_language": {"type": "string", "description": "Target language (e.g. \'spanish\', \'french\', \'japanese\')"},
                 },
                 "required": ["target_language"],
             },
@@ -292,7 +328,7 @@ async def list_tools() -> list[types.Tool]:
                 "properties": {
                     "steps": {
                         "type": "array",
-                        "description": "Pipeline steps, each with 'service' and 'input'",
+                        "description": "Pipeline steps, each with \'service\' and \'input\'",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -328,17 +364,34 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
 async def _dispatch(name: str, args: dict) -> dict:
     match name:
 
+        case "trial_summarise":
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.post(f"{GATEWAY}/trial/summarise", json={"text": args["text"]})
+                if r.status_code != 200:
+                    raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+                return r.json()
+
+        case "trial_review_code":
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                body = {"code": args["code"]}
+                if "language" in args:
+                    body["language"] = args["language"]
+                r = await client.post(f"{GATEWAY}/trial/review", json=body)
+                if r.status_code != 200:
+                    raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+                return r.json()
+
         case "summarise_pdf":
             return await l402_request(
-                "POST", "/summarise/url",
-                f"{GATEWAY}/summarise/url",
+                "POST", f"{GATEWAY}/summarise/url",
                 json_body={"url": args["url"], "max_pages": args.get("max_pages", 20)},
             )
 
         case "review_code":
             return await l402_request(
-                "POST", "/review/code",
-                f"{GATEWAY}/review/code",
+                "POST", f"{GATEWAY}/review/code",
                 json_body={
                     "code":     args["code"],
                     "language": args.get("language"),
@@ -348,22 +401,19 @@ async def _dispatch(name: str, args: dict) -> dict:
 
         case "review_code_url":
             return await l402_request(
-                "POST", "/review/url",
-                f"{GATEWAY}/review/url",
+                "POST", f"{GATEWAY}/review/url",
                 json_body={"url": args["url"], "language": args.get("language")},
             )
 
         case "summarise_webpage":
             return await l402_request(
-                "POST", "/extract/webpage",
-                f"{GATEWAY}/extract/webpage",
+                "POST", f"{GATEWAY}/extract/webpage",
                 json_body={"url": args["url"]},
             )
 
         case "extract_data":
             return await l402_request(
-                "POST", "/extract/data",
-                f"{GATEWAY}/extract/data",
+                "POST", f"{GATEWAY}/extract/data",
                 json_body={"url": args["url"], "max_pages": args.get("max_pages", 20)},
             )
 
@@ -374,22 +424,19 @@ async def _dispatch(name: str, args: dict) -> dict:
             if "url" in args:
                 body["url"] = args["url"]
             return await l402_request(
-                "POST", "/translate",
-                f"{GATEWAY}/translate",
+                "POST", f"{GATEWAY}/translate",
                 json_body=body,
             )
 
         case "extract_tables":
             return await l402_request(
-                "POST", "/analyse/tables",
-                f"{GATEWAY}/analyse/tables",
+                "POST", f"{GATEWAY}/analyse/tables",
                 json_body={"url": args["url"], "max_pages": args.get("max_pages", 20)},
             )
 
         case "compare_documents":
             return await l402_request(
-                "POST", "/analyse/compare",
-                f"{GATEWAY}/analyse/compare",
+                "POST", f"{GATEWAY}/analyse/compare",
                 json_body={
                     "url_a":     args["url_a"],
                     "url_b":     args["url_b"],
@@ -406,15 +453,13 @@ async def _dispatch(name: str, args: dict) -> dict:
             if "language" in args:
                 body["language"] = args["language"]
             return await l402_request(
-                "POST", "/analyse/explain",
-                f"{GATEWAY}/analyse/explain",
+                "POST", f"{GATEWAY}/analyse/explain",
                 json_body=body,
             )
 
         case "memory_store":
             return await l402_request(
-                "POST", "/memory/store",
-                f"{GATEWAY}/memory/store",
+                "POST", f"{GATEWAY}/memory/store",
                 json_body={"agent_id": args["agent_id"], "entries": args["entries"]},
             )
 
@@ -423,22 +468,19 @@ async def _dispatch(name: str, args: dict) -> dict:
             if "keys" in args:
                 body["keys"] = args["keys"]
             return await l402_request(
-                "POST", "/memory/retrieve",
-                f"{GATEWAY}/memory/retrieve",
+                "POST", f"{GATEWAY}/memory/retrieve",
                 json_body=body,
             )
 
         case "memory_delete":
             return await l402_request(
-                "POST", "/memory/delete",
-                f"{GATEWAY}/memory/delete",
+                "POST", f"{GATEWAY}/memory/delete",
                 json_body={"agent_id": args["agent_id"], "key": args["key"]},
             )
 
         case "run_workflow":
             return await l402_request(
-                "POST", "/workflow/run",
-                f"{GATEWAY}/workflow/run",
+                "POST", f"{GATEWAY}/workflow/run",
                 json_body={"steps": args["steps"], "label": args.get("label")},
             )
 
