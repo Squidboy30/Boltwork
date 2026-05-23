@@ -59,7 +59,8 @@ def get_client() -> anthropic.Anthropic:
 
 TRIAL_CODE_CHAR_LIMIT    = 500    # Hard cap on code input
 TRIAL_TEXT_CHAR_LIMIT    = 1000   # Hard cap on text input
-TRIAL_OUTPUT_TOKEN_LIMIT = 256    # Keep responses concise
+TRIAL_SUMMARISE_TOKEN_LIMIT = 256  # Summarise response is small
+TRIAL_REVIEW_TOKEN_LIMIT    = 600  # Review JSON has more fields
 RATE_LIMIT_CALLS         = 5      # Max calls per window
 RATE_LIMIT_WINDOW_SEC    = 3600   # 1 hour
 
@@ -189,10 +190,10 @@ def log_trial(endpoint: str, status: str, ip: str,
 # Core Claude call
 # ---------------------------------------------------------------------------
 
-def _call_claude(system: str, user: str) -> tuple[dict, int, int]:
+def _call_claude(system: str, user: str, max_tokens: int = 400) -> tuple[dict, int, int]:
     message = get_client().messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=TRIAL_OUTPUT_TOKEN_LIMIT,
+        max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
@@ -296,7 +297,7 @@ async def trial_review(body: TrialCodeRequest, request: Request):
 
     try:
         result, input_tokens, output_tokens = _call_claude(
-            TRIAL_REVIEW_SYSTEM_PROMPT, user_prompt
+            TRIAL_REVIEW_SYSTEM_PROMPT, user_prompt, max_tokens=TRIAL_REVIEW_TOKEN_LIMIT
         )
         result["_meta"] = {
             "input_tokens": input_tokens,
@@ -360,7 +361,7 @@ async def trial_summarise(body: TrialTextRequest, request: Request):
 
     try:
         result, input_tokens, output_tokens = _call_claude(
-            TRIAL_SUMMARISE_SYSTEM_PROMPT, user_prompt
+            TRIAL_SUMMARISE_SYSTEM_PROMPT, user_prompt, max_tokens=TRIAL_SUMMARISE_TOKEN_LIMIT
         )
         result["_meta"] = {
             "input_tokens": input_tokens,
