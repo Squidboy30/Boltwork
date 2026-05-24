@@ -342,9 +342,10 @@ POST {SERVICE_URL}/workflow/run      - Chain services in a single call (JSON bod
 GET  {SERVICE_URL}/workflow/info     - Supported services and pipeline syntax (free)
 
 ### Agent Memory
-POST {SERVICE_URL}/memory/store      - Write key-value pairs for your agent (JSON body: agent_id, entries{{}})
+POST {SERVICE_URL}/memory/store      - Write key-value pairs for your agent (JSON body: agent_id, entries{{}}, ttl_seconds?)
 POST {SERVICE_URL}/memory/retrieve   - Read stored keys (JSON body: agent_id, keys[]?)
 POST {SERVICE_URL}/memory/delete     - Delete a key (JSON body: agent_id, key) — free
+POST {SERVICE_URL}/memory/list       - List all keys for an agent, optional prefix filter (free)
 GET  {SERVICE_URL}/memory/info       - Memory service info and limits (free)
 
 ### Agent Suggest (Free — no payment required)
