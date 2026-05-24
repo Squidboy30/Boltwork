@@ -187,7 +187,8 @@ async def get_metrics():
     boltwork_stats    = parse_boltwork_logs(api_logs)
     boltwork_stats_1h = parse_boltwork_logs(api_logs_1h)
 
-    invoice_stats = {"settled": 0, "pending": 0, "total_sats": 0}
+    invoice_stats  = {"settled": 0, "pending": 0, "total_sats": 0}
+    alltime_stats  = {"total_calls": 0, "success_calls": 0, "error_calls": 0, "total_sats": 0, "by_endpoint": {}}
     try:
         from pathlib import Path
         import sqlite3
@@ -195,11 +196,27 @@ async def get_metrics():
         if db_path.exists():
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
+            # Gateway transactions
             row = conn.execute(
                 "SELECT COUNT(*) as total, COALESCE(SUM(gross_sats),0) as sats FROM transactions"
             ).fetchone()
-            invoice_stats["settled"] = row["total"]
+            invoice_stats["settled"]    = row["total"]
             invoice_stats["total_sats"] = row["sats"]
+            # All-time API call totals
+            if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='api_call_totals'").fetchone():
+                row = conn.execute("SELECT * FROM api_call_totals WHERE id=1").fetchone()
+                if row:
+                    alltime_stats["total_calls"]   = row["total_calls"]
+                    alltime_stats["success_calls"]  = row["success_calls"]
+                    alltime_stats["error_calls"]    = row["error_calls"]
+                    alltime_stats["total_sats"]     = row["total_sats"]
+            # Per-endpoint breakdown
+            if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='api_call_counts'").fetchone():
+                rows = conn.execute("SELECT * FROM api_call_counts ORDER BY success DESC").fetchall()
+                for r in rows:
+                    alltime_stats["by_endpoint"][r["endpoint"]] = {
+                        "success": r["success"], "errors": r["errors"], "total_sats": r["total_sats"]
+                    }
             conn.close()
     except Exception:
         pass
@@ -211,6 +228,7 @@ async def get_metrics():
         "boltwork": boltwork_stats,
         "boltwork_1h": boltwork_stats_1h,
         "invoices": invoice_stats,
+        "alltime": alltime_stats,
         "fly_logs_available": len(lnd_logs) > 0 or len(api_logs) > 0,
     }
 
