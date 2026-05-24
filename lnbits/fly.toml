@@ -1,0 +1,34 @@
+app = 'boltwork-lnbits'
+primary_region = 'lhr'
+
+[build]
+  image = 'lnbits/lnbits:latest'
+
+[env]
+  LNBITS_BACKEND_WALLET_CLASS = 'LndRestWallet'
+  LND_REST_ENDPOINT = 'https://parsebit-lnd.internal:8082'
+  LND_REST_CERT = ''
+  LNBITS_SITE_TITLE = 'Boltwork Demo Wallet'
+  LNBITS_SITE_TAGLINE = 'Try Boltwork with a pre-loaded Lightning wallet'
+  LNBITS_THEME_OPTIONS = 'classic'
+  LNBITS_ALLOWED_IPS = ''
+  LNBITS_ADMIN_UI = 'true'
+  PORT = '5000'
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = '30s'
+    interval = '15s'
+    method = 'GET'
+    path = '/health'
+    timeout = '10s'
+
+[mounts]
+  source = 'lnbits_data'
+  destination = '/app/data'
