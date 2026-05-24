@@ -7,6 +7,7 @@ primary_region = 'lhr'
 [env]
   LNBITS_BACKEND_WALLET_CLASS = 'LndRestWallet'
   LND_REST_ENDPOINT = 'https://parsebit-lnd.internal:8082'
+  LND_REST_VERIFY_TLS = 'false'
   LND_REST_CERT = ''
   LNBITS_SITE_TITLE = 'Boltwork Demo Wallet'
   LNBITS_SITE_TAGLINE = 'Try Boltwork with a pre-loaded Lightning wallet'
