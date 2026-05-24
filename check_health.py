@@ -99,6 +99,8 @@ def get_usage_stats():
             "/analyse/tables": 300,
             "/analyse/compare": 500,
             "/analyse/explain": 500,
+            "/analyse/image": 200,
+            "/analyse/contract": 1000,
             "/memory/store": 10,
             "/memory/retrieve": 5,
             "/memory/delete": 0,
