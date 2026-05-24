@@ -26,7 +26,8 @@ primary_region = 'lhr'
     grace_period = '60s'
     interval = '15s'
     method = 'GET'
-    path = '/api/v1/health'
+    path = '/'
+    expected_statuses = [200, 302, 307]
     timeout = '15s'
 
 [vm]
