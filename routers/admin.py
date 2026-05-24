@@ -164,10 +164,11 @@ def parse_boltwork_logs(logs: list) -> dict:
 
 @router.get("/metrics", dependencies=[Depends(require_admin)])
 async def get_metrics():
-    gateway_health, api_health, lnd_logs, api_logs = await asyncio.gather(
+    gateway_health, api_health, lnd_logs, api_logs, api_logs_1h = await asyncio.gather(
         get_gateway_health(),
         get_parsebit_health(),
-        fetch_fly_logs(FLY_APP_LND, minutes=60),
+        fetch_fly_logs(FLY_APP_LND, minutes=1440),
+        fetch_fly_logs(FLY_APP_API, minutes=1440),
         fetch_fly_logs(FLY_APP_API, minutes=60),
         return_exceptions=True
     )
@@ -179,9 +180,12 @@ async def get_metrics():
         lnd_logs = []
     if isinstance(api_logs, Exception):
         api_logs = []
+    if isinstance(api_logs_1h, Exception):
+        api_logs_1h = []
 
     aperture_stats = parse_aperture_logs(lnd_logs)
-    boltwork_stats = parse_boltwork_logs(api_logs)
+    boltwork_stats    = parse_boltwork_logs(api_logs)
+    boltwork_stats_1h = parse_boltwork_logs(api_logs_1h)
 
     invoice_stats = {"settled": 0, "pending": 0, "total_sats": 0}
     try:
@@ -205,6 +209,7 @@ async def get_metrics():
         "health": {"gateway": gateway_health, "api": api_health},
         "aperture": aperture_stats,
         "boltwork": boltwork_stats,
+        "boltwork_1h": boltwork_stats_1h,
         "invoices": invoice_stats,
         "fly_logs_available": len(lnd_logs) > 0 or len(api_logs) > 0,
     }
