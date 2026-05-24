@@ -18,6 +18,98 @@ from routers.suggest import router as suggest_router
 from routers.gateway import router as gateway_router
 from routers.admin import router as admin_router
 
+
+# ---------------------------------------------------------------------------
+# Persistent all-time call counter (SQLite on /data volume)
+# ---------------------------------------------------------------------------
+
+import sqlite3
+from pathlib import Path
+
+_COUNTER_DB = Path("/data/gateway.db")
+_PRICE_MAP = {
+    "/summarise/upload":  500,
+    "/summarise/url":     500,
+    "/review/code":      2000,
+    "/review/url":       2000,
+    "/extract/webpage":   100,
+    "/extract/data":      200,
+    "/translate":         150,
+    "/analyse/tables":    300,
+    "/analyse/compare":   500,
+    "/analyse/explain":   500,
+    "/trial/summarise":     0,
+    "/trial/review":        0,
+    "/memory/store":       10,
+    "/memory/retrieve":     5,
+    "/workflow/run":     1000,
+}
+
+def _ensure_counter_table():
+    try:
+        conn = sqlite3.connect(_COUNTER_DB)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS api_call_counts (
+                endpoint    TEXT PRIMARY KEY,
+                success     INTEGER DEFAULT 0,
+                errors      INTEGER DEFAULT 0,
+                total_sats  INTEGER DEFAULT 0,
+                updated_at  TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS api_call_totals (
+                id          INTEGER PRIMARY KEY CHECK (id = 1),
+                total_calls INTEGER DEFAULT 0,
+                success_calls INTEGER DEFAULT 0,
+                error_calls INTEGER DEFAULT 0,
+                total_sats  INTEGER DEFAULT 0,
+                updated_at  TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO api_call_totals (id, total_calls, success_calls, error_calls, total_sats)
+            VALUES (1, 0, 0, 0, 0)
+        """)
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+def db_record_call(endpoint: str, status: str):
+    """Increment persistent counters. Called after every API call."""
+    try:
+        sats = _PRICE_MAP.get(endpoint, 0) if status == "success" else 0
+        is_success = 1 if status == "success" else 0
+        is_error   = 1 if status == "error"   else 0
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        conn = sqlite3.connect(_COUNTER_DB)
+        # Per-endpoint row
+        conn.execute("""
+            INSERT INTO api_call_counts (endpoint, success, errors, total_sats, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(endpoint) DO UPDATE SET
+                success    = success    + excluded.success,
+                errors     = errors     + excluded.errors,
+                total_sats = total_sats + excluded.total_sats,
+                updated_at = excluded.updated_at
+        """, (endpoint, is_success, is_error, sats, now))
+        # Grand total row
+        conn.execute("""
+            UPDATE api_call_totals SET
+                total_calls   = total_calls   + 1,
+                success_calls = success_calls + ?,
+                error_calls   = error_calls   + ?,
+                total_sats    = total_sats    + ?,
+                updated_at    = ?
+            WHERE id = 1
+        """, (is_success, is_error, sats, now))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Never block the API response
+
 def log_call(endpoint: str, status: str, result: dict = None, error: str = None,
              duration_ms: int = 0, file_size_bytes: int = 0, source_url: str = None):
     entry = {
@@ -41,6 +133,7 @@ def log_call(endpoint: str, status: str, result: dict = None, error: str = None,
     if error:
         entry["error"] = error
     print("BOLTWORK_LOG " + json.dumps(entry), flush=True)
+    db_record_call(endpoint, status)
 
 
 async def resolve_hostname_doh(hostname: str) -> str:
@@ -81,6 +174,7 @@ async def fetch_pdf_from_url(url: str, timeout: float = 30.0) -> httpx.Response:
 
 SERVICE_URL = os.environ.get("SERVICE_URL", "http://localhost:8000")
 
+_ensure_counter_table()
 app = FastAPI(
     title="Boltwork API",
     description="Autonomous agent-native AI services. Pay-per-call via Bitcoin Lightning L402.",
