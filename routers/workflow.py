@@ -29,6 +29,8 @@ Supported services (allow-list — no arbitrary HTTP):
   review      → review/code      (input: code, language?, filename?)
   compare     → analyse/compare  (input: url_a, url_b, max_pages?)
   summarise   → summarise/url    (alias for pdf)
+  image       → analyse/image   (input: url, detail?)
+  contract    → analyse/contract (input: url, max_pages?)
 
 Output passing:
   Each service exposes a primary text field used for chaining:
@@ -41,6 +43,8 @@ Output passing:
   review    → summary
   compare   → summary
   summarise → summary
+  image     → description
+  contract  → summary
 
   When a step uses {"$from": N}, the primary text of step N is injected
   as the "text" input of the current step (useful for translate after webpage).
