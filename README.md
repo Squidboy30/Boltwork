@@ -1,7 +1,5 @@
 mcp-name: io.github.Squidboy30/boltwork-mcp
-
 # boltwork-mcp
-
 **MCP server for Boltwork — AI services that pay for themselves via Bitcoin Lightning.**
 
 Give your AI agent PDF summarisation, code review, translation, web extraction, document comparison, and persistent memory — all paid autonomously in sats. No API keys. No subscriptions. No accounts.
@@ -21,26 +19,9 @@ This package wraps Boltwork as an [MCP server](https://modelcontextprotocol.io) 
 
 ---
 
-## Install
-
-```bash
-pip install boltwork-mcp
-
-# If using NWC (Nostr Wallet Connect):
-pip install "boltwork-mcp[nwc]"
-```
-
-Or use directly with `uvx` — no install needed:
-
-```bash
-uvx boltwork-mcp
-```
-
----
-
 ## Try it immediately — no wallet required
 
-Two tools work right now with zero setup. Add boltwork to your MCP config (no env vars needed):
+Two tools work right now with zero setup:
 
 ```json
 {
@@ -55,34 +36,44 @@ Two tools work right now with zero setup. Add boltwork to your MCP config (no en
 ```
 
 Then ask your AI:
-
 ```
 "Use trial_review_code to review this: def add(a, b): return a + b"
-"Use trial_summarise to summarise this text: <paste any text>"
+"Use trial_summarise to summarise this: <paste any text>"
 ```
 
-You'll get a real AI result instantly. No Lightning wallet. No setup. Rate limited to 5 calls/hour.
-
-When you're ready to use the full suite of tools without limits, set up a Lightning wallet below.
+Real AI results instantly. No Lightning wallet. No setup. Rate limited to 5 calls/hour.
 
 ---
 
-## Setup (for paid tools)
+## Install
 
-### 1. Get a Lightning wallet
+```bash
+pip install boltwork-mcp
 
-You need a Lightning wallet that supports either:
+# If using NWC (Alby, Mutiny, Coinos, etc.):
+pip install "boltwork-mcp[nwc]"
+```
 
-**Option A — NWC (recommended, easiest)**
-- [Alby](https://nwc.getalby.com) — go to nwc.getalby.com, create a budget, copy the connection string
-- [Mutiny Wallet](https://mutinywallet.com) — self-custodial mobile wallet
+Or use directly with `uvx` — no install needed:
 
-**Option B — Phoenixd**
-- [Phoenixd](https://phoenix.acinq.co/server) — self-hosted Lightning node, simple REST API
+```bash
+uvx boltwork-mcp
+```
 
-### 2. Add to your MCP config
+---
 
-**Claude Desktop** — edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+## Setup — pick a wallet
+
+Four wallet backends are supported. Pick whichever fits your setup:
+
+### Option A — NWC / Nostr Wallet Connect *(easiest)*
+Works with **Alby**, **Mutiny Wallet**, **Coinos**, **Primal**, **Cashu.me**, and any NWC-compatible wallet.
+
+1. Get a connection string:
+   - **Alby** — go to [nwc.getalby.com](https://nwc.getalby.com), create a budget, copy the string
+   - **Mutiny** — Settings → Connections → Add connection
+   - **Coinos** — [coinos.io](https://coinos.io) → Settings → Nostr Wallet Connect
+2. Add to your MCP config:
 
 ```json
 {
@@ -91,14 +82,22 @@ You need a Lightning wallet that supports either:
       "command": "uvx",
       "args": ["boltwork-mcp"],
       "env": {
-        "NWC_CONNECTION_STRING": "nostr+walletconnect://your-connection-string-here"
+        "NWC_CONNECTION_STRING": "nostr+walletconnect://your-string-here"
       }
     }
   }
 }
 ```
 
-**Cursor** — edit `.cursor/mcp.json` in your project:
+Requires: `pip install "boltwork-mcp[nwc]"`
+
+---
+
+### Option B — LNbits
+Works with **lnbits.com** or any self-hosted LNbits instance. Popular with BTCPay Server users and home node operators.
+
+1. Create a wallet at [lnbits.com](https://lnbits.com) or your instance
+2. Go to API info → copy your Invoice/read key
 
 ```json
 {
@@ -107,14 +106,45 @@ You need a Lightning wallet that supports either:
       "command": "uvx",
       "args": ["boltwork-mcp"],
       "env": {
-        "NWC_CONNECTION_STRING": "nostr+walletconnect://your-connection-string-here"
+        "LNBITS_URL": "https://lnbits.com",
+        "LNBITS_API_KEY": "your-invoice-key-here"
       }
     }
   }
 }
 ```
 
-**Using Phoenixd instead of NWC:**
+For self-hosted: set `LNBITS_URL` to your instance URL (e.g. `https://lnbits.yourdomain.com`).
+
+---
+
+### Option C — Strike
+Works with a **Strike** account. Custodial, simple API key setup. Good for US users or anyone who already uses Strike.
+
+1. Create an account at [strike.me](https://strike.me)
+2. Go to [dashboard.strike.me/developers/api-keys](https://dashboard.strike.me/developers/api-keys) → create an API key
+
+```json
+{
+  "mcpServers": {
+    "boltwork": {
+      "command": "uvx",
+      "args": ["boltwork-mcp"],
+      "env": {
+        "STRIKE_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+---
+
+### Option D — Phoenixd
+Works with **Phoenixd** — ACINQ's self-hosted Lightning node. Simple REST API, no channel management.
+
+1. Install Phoenixd: [phoenix.acinq.co/server](https://phoenix.acinq.co/server)
+2. Get your HTTP password from the Phoenixd config
 
 ```json
 {
@@ -124,16 +154,23 @@ You need a Lightning wallet that supports either:
       "args": ["boltwork-mcp"],
       "env": {
         "PHOENIXD_URL": "http://localhost:9740",
-        "PHOENIXD_PASSWORD": "your-phoenixd-password"
+        "PHOENIXD_PASSWORD": "your-password-here"
       }
     }
   }
 }
 ```
 
-### 3. Restart your AI and start using tools
+---
 
-That's it. Your agent now has access to all Boltwork tools and will pay invoices automatically when it uses them.
+## MCP config locations
+
+| Client | Config file |
+|--------|------------|
+| Claude Desktop (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Cursor | `.cursor/mcp.json` in your project |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
 
 ---
 
@@ -141,111 +178,41 @@ That's it. Your agent now has access to all Boltwork tools and will pay invoices
 
 | Tool | What it does | Cost |
 |------|-------------|------|
-| `trial_review_code` | Free trial code review — no wallet needed | **free** |
-| `trial_summarise` | Free trial text summarisation — no wallet needed | **free** |
+| `trial_summarise` | Summarise text — free trial | Free |
+| `trial_review_code` | Review code — free trial | Free |
 | `summarise_pdf` | Summarise a PDF from URL | 500 sats |
-| `review_code` | Review code for bugs, security, quality | 2000 sats |
-| `review_code_url` | Review code from GitHub/GitLab URL | 2000 sats |
 | `summarise_webpage` | Summarise any web page | 100 sats |
+| `review_code` | Full code review with bugs, security, quality | 2000 sats |
+| `review_code_url` | Review code from GitHub/GitLab URL | 2000 sats |
 | `extract_data` | Extract structured data from PDF | 200 sats |
-| `translate` | Translate text or document to 24 languages | 150 sats |
-| `extract_tables` | Extract tables from PDF as structured JSON | 300 sats |
+| `translate` | Translate text or document (24 languages) | 150 sats |
+| `extract_tables` | Extract all tables from a PDF | 300 sats |
 | `compare_documents` | Diff two PDFs | 500 sats |
 | `explain_code` | Explain code in plain English | 500 sats |
-| `memory_store` | Store persistent key-value memory | 10 sats |
-| `memory_retrieve` | Read stored memory | 5 sats |
-| `memory_delete` | Delete a memory key | free |
-| `run_workflow` | Chain services in a single pipeline | 1000 sats |
+| `memory_store` | Store persistent agent memory | 10 sats |
+| `memory_retrieve` | Retrieve agent memory | 5 sats |
+| `memory_delete` | Delete a memory key | Free |
+| `run_workflow` | Chain multiple services in one call | 1000 sats |
 
 ---
 
-## Example prompts
+## Payment flow
 
-Once configured, just talk to your AI naturally:
+When your agent calls a paid tool:
 
-```
-"Summarise this research paper: https://arxiv.org/pdf/2301.00000"
+1. boltwork-mcp calls the Boltwork API
+2. Receives HTTP 402 with a Lightning invoice
+3. Pays the invoice automatically using your configured wallet
+4. Retries the request with the payment proof
+5. Returns the result to your agent
 
-"Review the code at https://github.com/me/repo/blob/main/app.py"
-
-"Translate this contract to Spanish: https://example.com/contract.pdf"
-
-"Compare these two versions of our terms of service:
-  v1: https://example.com/tos-v1.pdf
-  v2: https://example.com/tos-v2.pdf"
-
-"Remember that the last file I asked you to review was app.py 
- and the score was 7/10"
-```
-
-Your agent handles the payment automatically — you just see the result.
-
----
-
-## Workflow pipelines
-
-Chain multiple services in one call with `run_workflow`:
-
-```
-"Fetch the Bitcoin whitepaper, translate the summary to French,
- and store the translation in my agent memory"
-```
-
-The `$from` syntax passes outputs between steps:
-
-```json
-{
-  "steps": [
-    {"service": "pdf",       "input": {"url": "https://bitcoin.org/bitcoin.pdf"}},
-    {"service": "translate", "input": {"text": {"$from": 0}, "target_language": "french"}}
-  ]
-}
-```
-
----
-
-## Environment variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `NWC_CONNECTION_STRING` | One of these two | Nostr Wallet Connect string from Alby/Mutiny |
-| `PHOENIXD_URL` | One of these two | Phoenixd base URL e.g. `http://localhost:9740` |
-| `PHOENIXD_PASSWORD` | With Phoenixd | Phoenixd HTTP Basic auth password |
-| `BOLTWORK_GATEWAY` | Optional | Override gateway URL (default: `https://parsebit-lnd.fly.dev`) |
-
----
-
-## Pricing
-
-All prices are in satoshis (sats). At current rates, 1000 sats ≈ $0.60 — but this varies with Bitcoin's price.
-
-There is no subscription, no monthly fee, no minimum spend. You pay exactly for what your agent uses, nothing more.
-
----
-
-## How L402 works
-
-1. Agent calls a Boltwork tool
-2. `boltwork-mcp` sends the request to `parsebit-lnd.fly.dev`
-3. Receives HTTP 402 with a Lightning invoice (e.g. 500 sats for PDF summarisation)
-4. Pays the invoice via your configured wallet (NWC or Phoenixd)
-5. Retries the request with the payment proof
-6. Returns the result to your agent
-
-The whole flow takes 1-3 seconds. Your agent sees only the final result.
+Your agent never sees this — it just gets the result.
 
 ---
 
 ## Links
 
-- [Boltwork API](https://parsebit.fly.dev) — the service this MCP server wraps
-- [Agent spec](https://parsebit.fly.dev/agent-spec.md) — full API reference
-- [L402 Index](https://402index.io) — directory of L402 services
-- [MCP documentation](https://modelcontextprotocol.io) — learn about MCP
-- [Cracked Minds](https://crackedminds.co.uk) — the team behind Boltwork
-
----
-
-## License
-
-MIT
+- [Boltwork API](https://parsebit.fly.dev) — live API
+- [Agent spec](https://parsebit.fly.dev/agent-spec.md) — full endpoint documentation
+- [L402 manifest](https://parsebit.fly.dev/.well-known/l402.json) — machine-readable service discovery
+- [Cracked Minds](https://crackedminds.co.uk) — by Cracked Minds
