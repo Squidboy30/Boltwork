@@ -52,6 +52,8 @@ PRICE_MAP = {
     "/analyse/tables":    300,
     "/analyse/compare":   500,
     "/analyse/explain":   500,
+    "/analyse/image":    200,
+    "/analyse/contract": 1000,
 }
 
 # ---------------------------------------------------------------------------
