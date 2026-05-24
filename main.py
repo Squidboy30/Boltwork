@@ -310,6 +310,8 @@ POST {SERVICE_URL}/analyse/explain  - Explain code in plain English (JSON body: 
 - Agent Memory Write: 10 satoshis per call
 - Agent Memory Read: 5 satoshis per call
 - Workflow Pipeline: 1000 satoshis per run
+- Image Analysis: 200 satoshis per call
+- Contract Intelligence: 1000 satoshis per call
 - Agent Suggest: free (no payment required)
 - Trial endpoints: free (rate-limited, capped input)
 
@@ -425,7 +427,7 @@ def l402_well_known():
     return {
         "version": "1.0",
         "name": "Boltwork",
-        "description": "Boltwork provides AI services via Bitcoin Lightning L402. PDF summarisation (500 sats), code review (2000 sats), web page summarisation (100 sats), data extraction (200 sats), translation (150 sats), table extraction (300 sats), document comparison (500 sats), code explanation (500 sats), workflow pipelines (1000 sats), agent memory write (10 sats), agent memory read (5 sats). Trial endpoints free. No API key required.",
+        "description": "Boltwork provides AI services via Bitcoin Lightning L402. PDF summarisation (500 sats), code review (2000 sats), web page summarisation (100 sats), data extraction (200 sats), translation (150 sats), table extraction (300 sats), document comparison (500 sats), code explanation (500 sats), image analysis (200 sats), contract intelligence (1000 sats), workflow pipelines (1000 sats), agent memory write (10 sats), agent memory read (5 sats). Trial endpoints free. No API key required.",
         "url": SERVICE_URL,
         "spec": f"{SERVICE_URL}/agent-spec.md",
         "pricing": [
