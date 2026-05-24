@@ -277,15 +277,34 @@ async def get_lnd_stats():
             pass
         return None
 
-    info, chans = await asyncio.gather(
+    info, chans, inv_page = await asyncio.gather(
         lnd_get("/v1/getinfo"),
         lnd_get("/v1/channels"),
+        lnd_get("/v1/invoices?num_max_invoices=1&reversed=true"),
         return_exceptions=True
     )
     if isinstance(info, Exception):
         info = None
     if isinstance(chans, Exception):
         chans = None
+    if isinstance(inv_page, Exception):
+        inv_page = None
+
+    # total invoices = last_index_offset from reversed query
+    total_invoices = int(inv_page.get("last_index_offset", 0)) if inv_page else None
+    # settled invoices = count from Aperture DB (already tracked)
+    settled_invoices = None
+    try:
+        from pathlib import Path
+        import sqlite3
+        db = Path("/data/gateway.db")
+        if db.exists():
+            conn = sqlite3.connect(db)
+            row = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()
+            settled_invoices = row[0] if row else 0
+            conn.close()
+    except Exception:
+        pass
 
     channels = []
     if chans and "channels" in chans:
@@ -314,4 +333,6 @@ async def get_lnd_stats():
         "total_inbound":     sum(c["remote_balance"] for c in channels),
         "total_outbound":    sum(c["local_balance"] for c in channels),
         "total_capacity":    sum(c["capacity"] for c in channels),
+        "total_invoices":    total_invoices,
+        "settled_invoices":  settled_invoices,
     }
