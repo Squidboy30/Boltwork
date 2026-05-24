@@ -152,6 +152,92 @@ Never include any text outside the JSON object"""
 
 
 # ---------------------------------------------------------------------------
+# Image Analysis
+# ---------------------------------------------------------------------------
+
+IMAGE_ANALYSIS_SYSTEM_PROMPT = """You are a precise image analysis engine.
+Your output is always valid JSON - nothing else, no preamble, no markdown fences.
+
+Analyse the provided image and return this exact structure:
+{
+  "description": "clear, detailed description of what is shown in the image",
+  "content_type": "photo|diagram|chart|screenshot|document|artwork|other",
+  "objects": ["list of main objects, people, or elements detected"],
+  "text_content": "any text visible in the image, or null if none",
+  "colors": ["dominant colors"],
+  "sentiment": "positive|negative|neutral",
+  "tags": ["relevant tags for categorisation"],
+  "notes": "any additional observations about quality, context, or notable details"
+}
+
+Never include any text outside the JSON object"""
+
+# ---------------------------------------------------------------------------
+# Contract Intelligence
+# ---------------------------------------------------------------------------
+
+CONTRACT_SYSTEM_PROMPT = """You are an expert contract analyst with deep knowledge of commercial law.
+Your output is always valid JSON - nothing else, no preamble, no markdown fences.
+
+Analyse the provided contract and return this exact structure:
+{
+  "document_type": "inferred contract type (e.g. NDA, SaaS Agreement, Employment, Lease)",
+  "parties": [
+    {"role": "role in contract", "name": "party name or null"}
+  ],
+  "summary": "2-3 sentence plain-English summary of what this contract does",
+  "key_dates": [
+    {"label": "date type", "value": "date or null"}
+  ],
+  "key_terms": [
+    {"clause": "clause name", "summary": "plain English summary", "risk": "high|medium|low|none"}
+  ],
+  "obligations": [
+    {"party": "who", "obligation": "what they must do", "deadline": "when or null"}
+  ],
+  "termination_triggers": ["conditions that allow termination"],
+  "renewal_terms": "auto-renewal details or null",
+  "governing_law": "jurisdiction or null",
+  "risk_score": "high|medium|low",
+  "red_flags": ["any clauses that are unusual, one-sided, or potentially harmful"],
+  "recommended_actions": ["prioritised list of things to review or negotiate"]
+}
+
+Write for a business person, not a lawyer. Flag unusual or one-sided clauses clearly.
+Never include any text outside the JSON object"""
+
+# ---------------------------------------------------------------------------
+# New request models
+# ---------------------------------------------------------------------------
+
+class ImageAnalysisRequest(BaseModel):
+    url: Optional[str] = None
+    detail: Optional[str] = "auto"  # "low", "high", "auto"
+
+    @field_validator("url")
+    @classmethod
+    def url_not_empty(cls, v):
+        if v is not None:
+            v = v.strip()
+            if not v:
+                raise ValueError("url must not be empty")
+        return v
+
+
+class ContractRequest(BaseModel):
+    url: str
+    max_pages: Optional[int] = 30
+
+    @field_validator("url")
+    @classmethod
+    def url_not_empty(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError("url must not be empty")
+        return v
+
+
+# ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
 
@@ -581,4 +667,174 @@ async def explain_code(body: ExplanationRequest):
     except Exception as e:
         log_call("/analyse/explain", "error", error=str(e),
                  source_url=source_url, duration_ms=int((time.monotonic() - t0) * 1000))
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+
+
+@router.post("/analyse/image")
+async def analyse_image(body: ImageAnalysisRequest):
+    """
+    Analyse an image from a URL.
+
+    Returns structured description including content type, objects detected,
+    any visible text (OCR), colors, sentiment, and tags.
+
+    Request body:
+        url    (str, required) - URL of the image to analyse
+        detail (str, optional) - "low", "high", or "auto" (default: auto)
+
+    Supported formats: JPEG, PNG, GIF, WebP
+    Price: 200 sats via L402.
+    """
+    t0 = time.monotonic()
+
+    if not body.url:
+        raise HTTPException(status_code=400, detail="Provide an image 'url'.")
+
+    source_url = str(body.url)
+
+    try:
+        response = await fetch_url(source_url)
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch URL: {e}")
+
+    content_type = response.headers.get("content-type", "").lower()
+    if not any(t in content_type for t in ["image/", "jpeg", "jpg", "png", "gif", "webp"]):
+        # Try to infer from URL extension
+        ext = source_url.lower().split("?")[0].split(".")[-1]
+        if ext not in ["jpg", "jpeg", "png", "gif", "webp"]:
+            raise HTTPException(
+                status_code=415,
+                detail="URL does not appear to be an image. Supported: JPEG, PNG, GIF, WebP."
+            )
+
+    if len(response.content) > MAX_FETCH_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large. Max 10MB.")
+
+    # Determine media type
+    if "png" in content_type or source_url.lower().endswith(".png"):
+        media_type = "image/png"
+    elif "gif" in content_type or source_url.lower().endswith(".gif"):
+        media_type = "image/gif"
+    elif "webp" in content_type or source_url.lower().endswith(".webp"):
+        media_type = "image/webp"
+    else:
+        media_type = "image/jpeg"
+
+    import base64 as b64
+    image_data = b64.standard_b64encode(response.content).decode("utf-8")
+
+    try:
+        message = get_client().messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1500,
+            system=IMAGE_ANALYSIS_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": image_data,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": "Analyse this image and return the structured JSON response."
+                    }
+                ],
+            }],
+        )
+
+        response_text = message.content[0].text.strip()
+        if response_text.startswith("```"):
+            response_text = "\n".join(
+                l for l in response_text.splitlines() if not l.startswith("```")
+            ).strip()
+
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="Model returned malformed JSON. Please retry.")
+
+        result["_meta"] = {
+            "input_tokens": message.usage.input_tokens,
+            "output_tokens": message.usage.output_tokens,
+            "model": "claude-sonnet-4-6",
+            "source_url": source_url,
+            "image_size_bytes": len(response.content),
+            "media_type": media_type,
+        }
+
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        log_call("/analyse/image", "success", source_url=source_url,
+                 duration_ms=duration_ms,
+                 input_tokens=message.usage.input_tokens,
+                 output_tokens=message.usage.output_tokens)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content=result)
+
+    except HTTPException as e:
+        log_call("/analyse/image", "error", error=e.detail,
+                 source_url=source_url, duration_ms=int((time.monotonic() - t0) * 1000))
+        raise
+    except Exception as e:
+        log_call("/analyse/image", "error", error=str(e),
+                 source_url=source_url, duration_ms=int((time.monotonic() - t0) * 1000))
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+
+
+@router.post("/analyse/contract")
+async def analyse_contract(body: ContractRequest):
+    """
+    Analyse a contract PDF and return structured intelligence.
+
+    Returns risk score, key clauses, obligations, termination triggers,
+    red flags, and recommended actions in plain English.
+
+    Request body:
+        url       (str, required) - URL of the contract PDF
+        max_pages (int, optional) - max pages to process (default 30)
+
+    Price: 1000 sats via L402.
+    """
+    t0 = time.monotonic()
+
+    pdf_bytes = await fetch_pdf_bytes(str(body.url))
+
+    try:
+        text = extract_text_from_pdf_bytes(pdf_bytes, max_pages=body.max_pages)
+    except HTTPException:
+        raise
+
+    truncated = text[:MAX_TEXT_CHARS]
+
+    try:
+        result, input_tokens, output_tokens = call_claude(
+            CONTRACT_SYSTEM_PROMPT,
+            f"Analyse this contract:\n\n{truncated}",
+            max_tokens=3000,
+        )
+        result["_meta"] = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "model": "claude-sonnet-4-6",
+            "source_url": str(body.url),
+            "pages_processed": min(body.max_pages, 30),
+            "truncated": len(text) > MAX_TEXT_CHARS,
+        }
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        log_call("/analyse/contract", "success", source_url=str(body.url),
+                 duration_ms=duration_ms, input_tokens=input_tokens, output_tokens=output_tokens)
+        return JSONResponse(content=result)
+
+    except HTTPException as e:
+        log_call("/analyse/contract", "error", error=e.detail,
+                 source_url=str(body.url), duration_ms=int((time.monotonic() - t0) * 1000))
+        raise
+    except Exception as e:
+        log_call("/analyse/contract", "error", error=str(e),
+                 source_url=str(body.url), duration_ms=int((time.monotonic() - t0) * 1000))
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
