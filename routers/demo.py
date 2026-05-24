@@ -23,8 +23,7 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/demo", tags=["demo"])
 
-LNBITS_URL = os.environ.get("DEMO_LNBITS_URL", "").rstrip("/")
-LNBITS_KEY = os.environ.get("DEMO_LNBITS_KEY", "")
+STRIKE_API_KEY = os.environ.get("DEMO_STRIKE_KEY", "")
 DB_PATH    = Path(os.environ.get("MEMORY_DB_PATH", "/data/gateway.db"))
 MIN_BALANCE_SATS = 1000
 RATE_LIMIT_HOURS = 24
@@ -94,49 +93,71 @@ def _record_demo_payment(ip: str, invoice: str, amount_sats: int):
 # ---------------------------------------------------------------------------
 
 async def _get_balance() -> int:
-    """Get demo wallet balance in sats."""
-    if not LNBITS_URL or not LNBITS_KEY:
+    """Get Strike account balance in sats."""
+    if not STRIKE_API_KEY:
         return 0
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(
-            f"{LNBITS_URL}/api/v1/wallet",
-            headers={"X-Api-Key": LNBITS_KEY}
-        )
-        if r.status_code == 200:
-            data = r.json()
-            return data.get("balance", 0) // 1000  # msat to sat
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                "https://api.strike.me/v1/balances",
+                headers={"Authorization": f"Bearer {STRIKE_API_KEY}"}
+            )
+            if r.status_code == 200:
+                balances = r.json()
+                for b in balances:
+                    if b.get("currency") == "BTC":
+                        btc = float(b.get("available", 0))
+                        return int(btc * 100_000_000)  # BTC to sats
+    except Exception:
+        pass
     return 0
 
 
 async def _pay_invoice(invoice: str) -> str:
-    """Pay a bolt11 invoice from the demo wallet. Returns preimage."""
+    """Pay a bolt11 invoice via Strike API. Returns preimage."""
+    import asyncio
     async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(
-            f"{LNBITS_URL}/api/v1/payments",
-            json={"out": True, "bolt11": invoice},
-            headers={"X-Api-Key": LNBITS_KEY, "Content-Type": "application/json"}
+        # Create payment quote
+        quote_resp = await client.post(
+            "https://api.strike.me/v1/payment-quotes/lightning",
+            json={"lnInvoice": invoice, "sourceCurrency": "BTC"},
+            headers={"Authorization": f"Bearer {STRIKE_API_KEY}", "Content-Type": "application/json"},
         )
-        if r.status_code not in (200, 201):
-            raise HTTPException(status_code=402, detail=f"Demo payment failed: {r.text[:200]}")
-        data = r.json()
-        payment_hash = data.get("payment_hash")
-        if not payment_hash:
-            raise HTTPException(status_code=500, detail="No payment hash returned")
+        if quote_resp.status_code not in (200, 201):
+            raise HTTPException(status_code=402, detail=f"Demo payment failed: {quote_resp.text[:200]}")
+        quote = quote_resp.json()
+        quote_id = quote.get("paymentQuoteId")
+        if not quote_id:
+            raise HTTPException(status_code=500, detail="No paymentQuoteId from Strike")
 
-        # Fetch preimage
-        for _ in range(10):
-            await __import__("asyncio").sleep(1.0)
-            r2 = await client.get(
-                f"{LNBITS_URL}/api/v1/payments/{payment_hash}",
-                headers={"X-Api-Key": LNBITS_KEY}
+        # Execute payment
+        pay_resp = await client.patch(
+            f"https://api.strike.me/v1/payment-quotes/{quote_id}/execute",
+            headers={"Authorization": f"Bearer {STRIKE_API_KEY}"},
+        )
+        if pay_resp.status_code not in (200, 201):
+            raise HTTPException(status_code=402, detail=f"Strike execution failed: {pay_resp.text[:200]}")
+        pay_data = pay_resp.json()
+        payment_id = pay_data.get("paymentId")
+        if not payment_id:
+            raise HTTPException(status_code=500, detail="No paymentId from Strike")
+
+        # Poll for preimage
+        for _ in range(15):
+            await asyncio.sleep(1.0)
+            status_resp = await client.get(
+                f"https://api.strike.me/v1/payments/{payment_id}",
+                headers={"Authorization": f"Bearer {STRIKE_API_KEY}"},
             )
-            if r2.status_code == 200:
-                pdata = r2.json()
-                if pdata.get("paid"):
-                    preimage = pdata.get("details", {}).get("preimage") or pdata.get("preimage")
+            if status_resp.status_code == 200:
+                s = status_resp.json()
+                if s.get("state") == "COMPLETED":
+                    preimage = s.get("lightning", {}).get("preimage")
                     if preimage:
                         return preimage
-        raise HTTPException(status_code=500, detail="Payment sent but preimage not found")
+                elif s.get("state") in ("FAILED", "CANCELLED"):
+                    raise HTTPException(status_code=402, detail=f"Strike payment {s.get('state')}")
+        raise HTTPException(status_code=500, detail="Strike payment did not complete in time")
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +172,7 @@ class PayRequest(BaseModel):
 @router.get("/status")
 async def demo_status(request: Request):
     """Check demo wallet availability."""
-    if not LNBITS_URL or not LNBITS_KEY:
+    if not STRIKE_API_KEY:
         return JSONResponse({"available": False, "reason": "Demo wallet not configured"})
 
     balance = await _get_balance()
@@ -173,7 +194,7 @@ async def demo_pay(body: PayRequest, request: Request):
     Pay a Lightning invoice using the pre-loaded demo wallet.
     Rate limited to 1 payment per IP per 24h.
     """
-    if not LNBITS_URL or not LNBITS_KEY:
+    if not STRIKE_API_KEY:
         raise HTTPException(status_code=503, detail="Demo wallet not configured")
 
     ip = _get_client_ip(request)
