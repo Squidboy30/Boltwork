@@ -18,6 +18,7 @@ Schema:
     key       TEXT   — namespaced key (max 128 chars)
     value     TEXT   — JSON-serialisable value (max 4096 chars)
     updated   TEXT   — ISO8601 UTC timestamp of last write
+    expires   TEXT   — ISO8601 UTC expiry timestamp (null = no expiry)
 
 Constraints:
   - Max 100 keys per agent_id
@@ -88,9 +89,16 @@ def _get_conn() -> sqlite3.Connection:
                 key      TEXT NOT NULL,
                 value    TEXT NOT NULL,
                 updated  TEXT NOT NULL,
+                expires  TEXT,
                 PRIMARY KEY (agent_id, key)
             )
         """)
+        # Add expires column if upgrading from older schema
+        try:
+            _db_conn.execute("ALTER TABLE agent_memory ADD COLUMN expires TEXT")
+            _db_conn.commit()
+        except Exception:
+            pass  # Column already exists
         _db_conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent ON agent_memory (agent_id)"
         )
@@ -114,6 +122,19 @@ def _db():
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
+
+class ListRequest(BaseModel):
+    agent_id: str
+    prefix: Optional[str] = None   # Filter keys by prefix
+
+    @field_validator("agent_id")
+    @classmethod
+    def agent_id_valid(cls, v: str) -> str:
+        v = v.strip()
+        if not v or len(v) > MAX_AGENT_ID_LEN:
+            raise ValueError(f"agent_id must be 1-{MAX_AGENT_ID_LEN} chars")
+        return v
+
 
 class StoreRequest(BaseModel):
     agent_id: str
@@ -408,6 +429,47 @@ async def memory_retrieve(body: RetrieveRequest):
                    error=str(e), duration_ms=int((time.monotonic() - t0) * 1000))
         raise HTTPException(status_code=500, detail=f"Retrieval error: {e}")
 
+
+
+@router.post("/list")
+async def memory_list(body: ListRequest):
+    """
+    List all keys stored for an agent, optionally filtered by prefix.
+
+    Useful for discovering what an agent has stored without fetching values.
+    Returns key names, last updated time, and expiry if set.
+
+    Request body:
+        agent_id (str, required) - agent identifier
+        prefix   (str, optional) - filter keys starting with this prefix
+
+    Free — no Lightning payment required.
+    """
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with _db() as conn:
+        # Clean expired first
+        conn.execute(
+            "DELETE FROM agent_memory WHERE agent_id=? AND expires IS NOT NULL AND expires < ?",
+            (body.agent_id, now_str)
+        )
+        if body.prefix:
+            rows = conn.execute(
+                "SELECT key, updated, expires FROM agent_memory WHERE agent_id=? AND key LIKE ? ORDER BY key",
+                (body.agent_id, body.prefix + "%")
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT key, updated, expires FROM agent_memory WHERE agent_id=? ORDER BY key",
+                (body.agent_id,)
+            ).fetchall()
+
+    keys = [{"key": r["key"], "updated": r["updated"], "expires": r["expires"]} for r in rows]
+    return JSONResponse(content={
+        "agent_id":  body.agent_id,
+        "key_count": len(keys),
+        "keys":      keys,
+        "prefix":    body.prefix,
+    })
 
 @router.post("/delete")
 async def memory_delete(body: DeleteRequest):
