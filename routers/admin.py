@@ -250,7 +250,7 @@ async def health_simple():
 @router.get("/lnd", dependencies=[Depends(require_admin)])
 async def get_lnd_stats():
     """Live Lightning node stats: channels, balances, peers, sync status."""
-    LND_REST = os.environ.get("LND_REST_URL", "https://parsebit-lnd.fly.dev:8082")
+    LND_REST = os.environ.get("LND_REST_URL", "https://parsebit-lnd.fly.dev")
     MACAROON = os.environ.get("LND_MACAROON_HEX", "")
 
     if not MACAROON:
@@ -270,7 +270,7 @@ async def get_lnd_stats():
     async def lnd_get(path: str):
         try:
             async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
-                r = await client.get(f"{LND_REST}{path}", headers=headers)
+                r = await client.get(f"{LND_REST}/lnd{path}", headers=headers)
                 if r.status_code == 200:
                     return r.json()
         except Exception:
