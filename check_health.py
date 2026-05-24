@@ -189,21 +189,23 @@ def run_checks():
 
     # 4. FastAPI route checks — empty body triggers 422 if route exists
     routes = [
-        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [400, 422]),
-        ("FastAPI route — /review/code", f"{BOLTWORK_API}/review/code", '{}', [422]),
-        ("FastAPI route — /extract/webpage", f"{BOLTWORK_API}/extract/webpage", '{}', [422]),
-        ("FastAPI route — /extract/data", f"{BOLTWORK_API}/extract/data", '{}', [422]),
-        ("FastAPI route — /translate", f"{BOLTWORK_API}/translate", '{}', [422]),
-        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [400, 422]),
-        ("FastAPI route — /analyse/compare", f"{BOLTWORK_API}/analyse/compare", '{}', [422]),
-        ("FastAPI route — /analyse/explain", f"{BOLTWORK_API}/analyse/explain", '{}', [422]),
-        ("FastAPI route — /trial/review", f"{BOLTWORK_API}/trial/review", '{}', [422]),
-        ("FastAPI route — /trial/summarise", f"{BOLTWORK_API}/trial/summarise", '{}', [422]),
-        ("FastAPI route — /memory/store", f"{BOLTWORK_API}/memory/store", '{}', [422]),
-        ("FastAPI route — /memory/retrieve", f"{BOLTWORK_API}/memory/retrieve", '{}', [422]),
-        ("FastAPI route — /memory/delete", f"{BOLTWORK_API}/memory/delete", '{}', [422]),
-        ("FastAPI route — /workflow/run", f"{BOLTWORK_API}/workflow/run", '{}', [422]),
-        ("FastAPI route — /suggest", f"{BOLTWORK_API}/suggest", '{}', [422]),
+        ("FastAPI route — /summarise/url",      f"{BOLTWORK_API}/summarise/url",      '{}', [422]),
+        ("FastAPI route — /review/code",        f"{BOLTWORK_API}/review/code",        '{}', [422]),
+        ("FastAPI route — /extract/webpage",    f"{BOLTWORK_API}/extract/webpage",    '{}', [422]),
+        ("FastAPI route — /extract/data",       f"{BOLTWORK_API}/extract/data",       '{}', [422]),
+        ("FastAPI route — /translate",          f"{BOLTWORK_API}/translate",          '{}', [422]),
+        ("FastAPI route — /analyse/tables",     f"{BOLTWORK_API}/analyse/tables",     '{}', [422]),
+        ("FastAPI route — /analyse/compare",    f"{BOLTWORK_API}/analyse/compare",    '{}', [422]),
+        ("FastAPI route — /analyse/explain",    f"{BOLTWORK_API}/analyse/explain",    '{}', [422]),
+        ("FastAPI route — /analyse/image",      f"{BOLTWORK_API}/analyse/image",      '{}', [400, 422]),
+        ("FastAPI route — /analyse/contract",   f"{BOLTWORK_API}/analyse/contract",   '{}', [422]),
+        ("FastAPI route — /trial/review",       f"{BOLTWORK_API}/trial/review",       '{}', [422]),
+        ("FastAPI route — /trial/summarise",    f"{BOLTWORK_API}/trial/summarise",    '{}', [422]),
+        ("FastAPI route — /memory/store",       f"{BOLTWORK_API}/memory/store",       '{}', [422]),
+        ("FastAPI route — /memory/retrieve",    f"{BOLTWORK_API}/memory/retrieve",    '{}', [422]),
+        ("FastAPI route — /memory/delete",      f"{BOLTWORK_API}/memory/delete",      '{}', [422]),
+        ("FastAPI route — /workflow/run",       f"{BOLTWORK_API}/workflow/run",       '{}', [422]),
+        ("FastAPI route — /suggest",            f"{BOLTWORK_API}/suggest",            '{}', [422]),
     ]
     for name, url, body, expected in routes:
         ok, status, detail = check(name, url, method="POST",
@@ -227,6 +229,8 @@ def run_checks():
         ("Lightning gate — /memory/store (10 sats)", f"{BOLTWORK_L402}/memory/store", '{"agent_id":"healthcheck","entries":{"ping":"pong"}}'),
         ("Lightning gate — /memory/retrieve (5 sats)", f"{BOLTWORK_L402}/memory/retrieve", '{"agent_id":"healthcheck"}'),
         ("Lightning gate — /workflow/run (1000 sats)", f"{BOLTWORK_L402}/workflow/run", '{"steps":[{"service":"webpage","input":{"url":"https://example.com"}}]}'),
+        ("Lightning gate — /analyse/image (200 sats)", f"{BOLTWORK_L402}/analyse/image", '{"url":"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/320px-Cat03.jpg"}'),
+        ("Lightning gate — /analyse/contract (1000 sats)", f"{BOLTWORK_L402}/analyse/contract", '{"url":"https://example.com/test.pdf"}'),
     ]
     for name, url, body in gates:
         ok, status, detail = check_402(name, url, body)
