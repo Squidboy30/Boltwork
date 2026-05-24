@@ -10,6 +10,7 @@ from typing import Optional
 
 from routers.review import router as review_router
 from routers.pay import router as pay_router
+from routers.demo import router as demo_router
 from routers.extract import router as extract_router
 from routers.analyse import router as analyse_router
 from routers.trial import router as trial_router
@@ -186,6 +187,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 app.include_router(review_router)
 app.include_router(pay_router)
+app.include_router(demo_router)
 app.include_router(extract_router)
 app.include_router(analyse_router)
 app.include_router(trial_router)
