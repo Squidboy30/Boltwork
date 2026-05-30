@@ -15,6 +15,7 @@ import os
 import time
 from typing import Optional
 
+import base64
 import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
