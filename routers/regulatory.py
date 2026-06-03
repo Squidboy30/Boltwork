@@ -90,6 +90,63 @@ class DocumentRequest(BaseModel):
         return v
 
 
+
+
+FCA_BASE = "https://register.fca.org.uk/services/V0.1"
+
+
+def fca_headers() -> dict:
+    """Headers for FCA register API - activates when FCA_API_KEY is set."""
+    fca_key = os.environ.get("FCA_API_KEY", "")
+    fca_email = os.environ.get("FCA_EMAIL", "tech@crackedminds.co.uk")
+    if not fca_key:
+        return {}
+    return {
+        "X-AUTH-EMAIL": fca_email,
+        "X-AUTH-KEY": fca_key,
+        "Accept": "application/json",
+        "User-Agent": "Boltwork/2.0 (crackedminds.co.uk)"
+    }
+
+
+async def fca_search_firm(query: str) -> list:
+    """Search FCA register directly when API key is active."""
+    headers = fca_headers()
+    if not headers:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                f"{FCA_BASE}/Firm/Search",
+                params={"q": query, "page": 1},
+                headers=headers
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data.get("Data"), list):
+                    return data["Data"]
+        return []
+    except Exception:
+        return []
+
+
+async def fca_firm_detail(frn: str) -> dict:
+    """Get FCA firm detail when API key is active."""
+    headers = fca_headers()
+    if not headers:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(f"{FCA_BASE}/Firm/{frn}", headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data.get("Data"), list) and data["Data"]:
+                    return data["Data"][0]
+        return {}
+    except Exception:
+        return {}
+
+
 async def search_companies_house(query: str, items: int = 10) -> list:
     """Search Companies House for firms matching query."""
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -261,7 +318,18 @@ async def analyse_regulatory(body: RegulatoryRequest):
     try:
         import asyncio
 
-        # Search Companies House
+        # Try FCA register first if key is active, fall back to Companies House
+        fca_results = await fca_search_firm(body.query)
+        if fca_results:
+            # FCA API active - enrich data with FCA details
+            top_fca = fca_results[0]
+            frn = str(top_fca.get("FRN", ""))
+            fca_detail = await fca_firm_detail(frn) if frn else {}
+        else:
+            fca_results = []
+            fca_detail = {}
+
+        # Search Companies House for filing/officer data
         results = await search_companies_house(body.query, items=10)
 
         if not results:
@@ -347,8 +415,9 @@ async def analyse_regulatory(body: RegulatoryRequest):
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "model": "claude-sonnet-4-6",
-                "data_source": "Companies House + Claude AI",
-                "fca_api_status": "pending_ip_whitelist",
+                "data_source": "FCA Register + Claude AI" if fca_results else "Companies House + Claude AI",
+                "fca_api_active": bool(fca_results),
+                "fca_top_match": fca_results[0] if fca_results else None,
             }
         }
 
