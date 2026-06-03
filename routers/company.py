@@ -341,6 +341,124 @@ async def get_previous_names(number: str) -> list:
     return []
 
 
+
+async def get_insolvency(number: str) -> list:
+    """Fetch insolvency history detail from Companies House."""
+    api_key = os.environ.get("COMPANIES_HOUSE_API_KEY")
+    if not api_key:
+        return []
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(
+            f"{CH_BASE}/company/{number}/insolvency",
+            headers=_ch_headers()
+        )
+        if r.status_code == 200:
+            cases = r.json().get("cases", [])
+            return [
+                {
+                    "type": c.get("type", ""),
+                    "dates": c.get("dates", []),
+                    "practitioners": [
+                        {"name": p.get("name", ""), "role": p.get("role", "")}
+                        for p in c.get("practitioners", [])
+                    ],
+                    "notes": c.get("notes", []),
+                }
+                for c in cases[:5]
+            ]
+        return []
+
+
+async def get_registered_office_history(number: str) -> list:
+    """Fetch registered office address history from filing history."""
+    api_key = os.environ.get("COMPANIES_HOUSE_API_KEY")
+    if not api_key:
+        return []
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(
+            f"{CH_BASE}/company/{number}/filing-history",
+            params={"category": "address", "items_per_page": 10},
+            headers=_ch_headers()
+        )
+        if r.status_code == 200:
+            items = r.json().get("items", [])
+            return [
+                {
+                    "date": i.get("date", ""),
+                    "description": i.get("description", ""),
+                }
+                for i in items[:5]
+            ]
+        return []
+
+
+async def get_gazette_notices(company_name: str, number: str) -> list:
+    """Search London Gazette for notices about this company."""
+    try:
+        query = company_name.replace(" ", "+")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                f"https://www.thegazette.co.uk/all-notices/notice",
+                params={
+                    "text": company_name,
+                    "categorycode": "1000",  # insolvency/winding up
+                    "results-page-size": 5,
+                    "format": "application/json",
+                },
+                headers={"Accept": "application/json", "User-Agent": "Boltwork/2.0"}
+            )
+            if r.status_code == 200:
+                data = r.json()
+                notices = data.get("_embedded", {}).get("noticeList", [])
+                return [
+                    {
+                        "title": n.get("title", ""),
+                        "date": n.get("publicationDate", ""),
+                        "category": n.get("noticeCode", ""),
+                        "url": f"https://www.thegazette.co.uk/notice/{n.get('id', '')}",
+                    }
+                    for n in notices[:5]
+                ]
+    except Exception:
+        pass
+    return []
+
+
+async def get_director_other_companies(officer_ids: list) -> list:
+    """For each active director, fetch their other active appointments."""
+    api_key = os.environ.get("COMPANIES_HOUSE_API_KEY")
+    if not api_key or not officer_ids:
+        return []
+    results = []
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for officer_id in officer_ids[:3]:  # limit to 3 directors
+            try:
+                r = await client.get(
+                    f"{CH_BASE}/officers/{officer_id}/appointments",
+                    params={"items_per_page": 10},
+                    headers=_ch_headers()
+                )
+                if r.status_code == 200:
+                    items = r.json().get("items", [])
+                    active = [
+                        {
+                            "company_name": i.get("appointed_to", {}).get("company_name", ""),
+                            "company_number": i.get("appointed_to", {}).get("company_number", ""),
+                            "role": i.get("officer_role", ""),
+                            "appointed": i.get("appointed_on", ""),
+                        }
+                        for i in items
+                        if not i.get("resigned_on") and i.get("appointed_to", {}).get("company_number")
+                    ]
+                    if active:
+                        results.append({
+                            "officer_id": officer_id,
+                            "appointments": active[:8]
+                        })
+            except Exception:
+                continue
+    return results
+
 RISK_SYSTEM_PROMPT = """You are a UK company risk assessment engine. \
 Your output is always valid JSON — nothing else, no preamble, no markdown fences.
 
@@ -428,6 +546,34 @@ async def analyse_company(body: CompanyRequest):
             get_previous_names(number),
         )
 
+        # Additional enrichment
+        company_display_name = profile.get("company_name", body.company_name or "")
+        insolvency_detail, address_history, gazette_notices = await asyncio.gather(
+            get_insolvency(number),
+            get_registered_office_history(number),
+            get_gazette_notices(company_display_name, number),
+        )
+
+        # Director cross-reference — extract officer IDs from links
+        active_directors = [d for d in directors if not d.get("resigned_on")]
+        officer_ids = []
+        for d in active_directors[:3]:
+            links = d.get("links", {})
+            officer_url = links.get("officer", {}).get("appointments", "")
+            if officer_url:
+                parts = officer_url.strip("/").split("/")
+                if len(parts) >= 2:
+                    officer_ids.append(parts[-2])
+        related_companies = await get_director_other_companies(officer_ids)
+
+        # Detect rapid director changes (governance flag)
+        from datetime import datetime, timezone
+        one_year_ago = datetime.now(timezone.utc).replace(year=datetime.now().year - 1)
+        recent_resignations = [
+            d for d in directors
+            if d.get("resigned_on") and d.get("resigned_on", "") >= one_year_ago.strftime("%Y-%m-%d")
+        ]
+
         # Build address string
         addr = profile.get("registered_office_address", {})
         address_str = ", ".join(p for p in [
@@ -470,19 +616,21 @@ async def analyse_company(body: CompanyRequest):
             "incorporated": profile.get("date_of_creation"),
             "nature_of_business": nature_of_business,
             "has_insolvency_history": profile.get("has_insolvency_history", False),
+            "insolvency_cases": len(insolvency_detail),
+            "gazette_notices_count": len(gazette_notices),
+            "gazette_notices": [n.get("title", "") for n in gazette_notices[:3]],
             "active_charges_count": len(active_charges),
             "registered_office_in_dispute": profile.get(
                 "registered_office_is_in_dispute", False
             ),
-            "active_directors": len(
-                [d for d in formatted_directors if not d["resigned"]]
-            ),
-            "resigned_directors": len(
-                [d for d in formatted_directors if d["resigned"]]
-            ),
+            "address_changes_recent": len(address_history),
+            "active_directors": len([d for d in formatted_directors if not d["resigned"]]),
+            "resigned_directors": len([d for d in formatted_directors if d["resigned"]]),
+            "recent_resignations_12mo": len(recent_resignations),
             "previous_names_count": len(prev_names),
             "confirmation_statement_overdue": conf_overdue,
             "pscs_count": len(pscs),
+            "director_multi_company_count": len(related_companies),
             "filings": filings,
         }
 
@@ -544,6 +692,14 @@ async def analyse_company(body: CompanyRequest):
                 }
             },
             "risk_assessment": risk,
+            "insolvency_detail": insolvency_detail,
+            "gazette_notices": gazette_notices,
+            "address_history": address_history,
+            "related_companies": related_companies,
+            "recent_resignations": [
+                {"name": d.get("name", ""), "resigned": d.get("resigned_on", "")}
+                for d in recent_resignations
+            ],
             "_meta": {
                 "companies_house_number": number,
                 "accounts_pdf_url": filings.get("latest_document_url"),
