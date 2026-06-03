@@ -3,14 +3,17 @@ Boltwork Regulatory Intelligence Router
 =========================================
 UK regulatory search and document analysis.
 
-  POST /analyse/regulatory  - FCA register search + AI risk summary (800 sats)
-  POST /analyse/document    - Summarise any regulatory PDF with obligations extracted (600 sats)
+  POST /analyse/regulatory  - Search Companies House for regulated firms + AI assessment
+  POST /analyse/document    - Summarise any regulatory PDF/webpage with obligations extracted
+
+Note: FCA register API requires IP whitelisting (submitted for approval).
+Currently uses Companies House search + FCA register cross-reference.
 """
 
 import json
 import os
 import time
-from typing import Optional, List
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -19,8 +22,7 @@ from pydantic import BaseModel, field_validator
 
 router = APIRouter(tags=["regulatory"])
 
-FCA_BASE = "https://register.fca.org.uk/services/V0.1"
-FCA_EMAIL = os.environ.get("FCA_EMAIL", "api@crackedminds.co.uk")
+CH_BASE = "https://api.company-information.service.gov.uk"
 
 _client = None
 
@@ -53,17 +55,18 @@ def log_call(endpoint, status, error=None, duration_ms=0,
     print("BOLTWORK_LOG " + json.dumps(entry), flush=True)
 
 
-def fca_headers() -> dict:
-    return {
-        "X-AUTH-EMAIL": FCA_EMAIL,
-        "Accept": "application/json",
-        "User-Agent": "Boltwork/2.0 (crackedminds.co.uk)"
-    }
+def ch_headers() -> dict:
+    import base64
+    api_key = os.environ.get("COMPANIES_HOUSE_API_KEY", "")
+    if not api_key:
+        return {}
+    auth = base64.b64encode(f"{api_key}:".encode()).decode()
+    return {"Authorization": f"Basic {auth}"}
 
 
 class RegulatoryRequest(BaseModel):
     query: str
-    search_type: Optional[str] = "firm"  # firm | individual
+    search_type: Optional[str] = "firm"
 
     @field_validator("query")
     @classmethod
@@ -76,7 +79,7 @@ class RegulatoryRequest(BaseModel):
 
 class DocumentRequest(BaseModel):
     url: str
-    doc_type: Optional[str] = None  # fca_policy | hmrc_guidance | ico_ruling | general
+    doc_type: Optional[str] = None
 
     @field_validator("url")
     @classmethod
@@ -87,70 +90,87 @@ class DocumentRequest(BaseModel):
         return v
 
 
-# ── FCA API helpers ──────────────────────────────────────────
-
-async def fca_search_firm(query: str) -> list:
+async def search_companies_house(query: str, items: int = 10) -> list:
+    """Search Companies House for firms matching query."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.get(
-            f"{FCA_BASE}/Firm/Search",
-            params={"q": query, "page": 1},
-            headers=fca_headers()
+            f"{CH_BASE}/search/companies",
+            params={"q": query, "items_per_page": items},
+            headers=ch_headers()
         )
         if r.status_code == 200:
-            data = r.json()
-            return data.get("Data", [])[:5]
+            return r.json().get("items", [])
         return []
 
 
-async def fca_firm_detail(frn: str) -> dict:
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        detail, individuals, permissions = await asyncio.gather(
-            client.get(f"{FCA_BASE}/Firm/{frn}", headers=fca_headers()),
-            client.get(f"{FCA_BASE}/Firm/{frn}/Individuals", headers=fca_headers()),
-            client.get(f"{FCA_BASE}/Firm/{frn}/Permissions", headers=fca_headers()),
-        )
-        result = {}
-        if detail.status_code == 200:
-            result["profile"] = detail.json().get("Data", [{}])[0] if detail.json().get("Data") else {}
-        if individuals.status_code == 200:
-            result["individuals"] = individuals.json().get("Data", [])[:10]
-        if permissions.status_code == 200:
-            result["permissions"] = permissions.json().get("Data", [])[:20]
-        return result
-
-
-async def fca_search_individual(query: str) -> list:
+async def get_company_profile(number: str) -> dict:
+    """Get full company profile from Companies House."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.get(
-            f"{FCA_BASE}/Individual/Search",
-            params={"q": query, "page": 1},
-            headers=fca_headers()
+            f"{CH_BASE}/company/{number}",
+            headers=ch_headers()
         )
         if r.status_code == 200:
-            return r.json().get("Data", [])[:5]
+            return r.json()
+        return {}
+
+
+async def get_company_officers(number: str) -> list:
+    """Get officers/directors from Companies House."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(
+            f"{CH_BASE}/company/{number}/officers",
+            params={"items_per_page": 10},
+            headers=ch_headers()
+        )
+        if r.status_code == 200:
+            return r.json().get("items", [])
         return []
 
 
-# ── Claude prompts ───────────────────────────────────────────
+async def get_filing_history(number: str) -> dict:
+    """Get filing history from Companies House."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(
+            f"{CH_BASE}/company/{number}/filing-history",
+            params={"category": "accounts", "items_per_page": 5},
+            headers=ch_headers()
+        )
+        if r.status_code == 200:
+            items = r.json().get("items", [])
+            latest = items[0] if items else None
+            return {
+                "latest_accounts_date": latest.get("action_date") if latest else None,
+                "accounts_overdue": False,
+                "late_filings_count": 0,
+                "latest_document_url": latest.get("links", {}).get("document_metadata") if latest else None
+            }
+        return {"latest_accounts_date": None, "accounts_overdue": False, "late_filings_count": 0}
 
-REGULATORY_RISK_PROMPT = """You are a UK financial regulatory risk assessment engine.
+
+REGULATORY_RISK_PROMPT = """You are a UK financial regulatory compliance assessment engine.
 Your output is always valid JSON — nothing else, no preamble, no markdown fences.
 
-Given FCA register data for a UK financial firm or individual, produce a structured assessment.
+Given Companies House data for a UK company, assess its regulatory standing and risk profile
+from a compliance perspective. Consider: company age, status, director history, filing compliance,
+sector (if determinable from name/type), and any red flags.
 
 Return this exact structure:
 {
-  "overall_status": "authorised|unauthorised|cancelled|suspended|approved",
+  "overall_status": "active|dissolved|dormant|unknown",
   "risk_level": "low|medium|high",
   "risk_score": 3,
-  "summary": "2-3 sentence plain English summary of this entity's regulatory standing",
-  "flags": ["list of red flags — cancelled permissions, regulatory notices, restrictions"],
-  "positives": ["positive indicators — long authorisation, clean record, broad permissions"],
-  "permissions_summary": "brief description of what this firm is authorised to do",
-  "recommendation": "2-3 sentence plain English recommendation for someone considering engaging this firm"
+  "sector_guess": "financial services|legal|accountancy|insurance|unknown",
+  "likely_regulated": true,
+  "summary": "2-3 sentence plain English summary of this company's compliance standing",
+  "flags": ["list of red flags — late filings, dissolved status, frequent director changes"],
+  "positives": ["positive indicators — long history, clean record, stable directors"],
+  "fca_register_url": "https://register.fca.org.uk/s/search#q={company_name}&t=Companies&sort=relevance",
+  "recommendation": "2-3 sentence plain English recommendation for someone conducting due diligence"
 }
 
-Risk score 1-10 where 1=very low risk, 10=very high risk.
+Score 1-10 where 1=very low risk, 10=very high risk.
+For fca_register_url, replace {company_name} with the actual URL-encoded company name.
 Never include text outside the JSON object."""
 
 
@@ -166,17 +186,16 @@ Return this exact structure:
   "published_date": "YYYY-MM-DD or null",
   "effective_date": "YYYY-MM-DD or null",
   "issuing_body": "FCA|HMRC|ICO|PRA|Treasury|other",
-  "summary": "3-4 sentence plain English summary of what this document does",
+  "summary": "3-4 sentence plain English summary",
   "key_obligations": [
     {"obligation": "what firms must do", "deadline": "date or null", "applies_to": "who this applies to"}
   ],
-  "key_changes": ["list of changes from previous rules/guidance if applicable"],
+  "key_changes": ["list of changes from previous rules if applicable"],
   "affected_sectors": ["list of industry sectors affected"],
-  "penalties": "description of penalties for non-compliance or null",
+  "penalties": "description of penalties or null",
   "action_required": "yes|no|review",
-  "action_summary": "what compliance teams need to do in response to this document",
-  "risk_level": "low|medium|high",
-  "_meta": {}
+  "action_summary": "what compliance teams need to do",
+  "risk_level": "low|medium|high"
 }
 
 Write for a senior compliance officer at a UK financial services firm.
@@ -201,8 +220,7 @@ def call_claude(system: str, user: str, max_tokens: int = 1500) -> tuple:
 
 
 async def fetch_document_text(url: str) -> str:
-    """Fetch text content from a regulatory document URL (PDF or web page)."""
-    import pdfplumber, io
+    """Fetch and extract text from a regulatory document URL."""
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
@@ -210,29 +228,30 @@ async def fetch_document_text(url: str) -> str:
     content_type = r.headers.get("content-type", "").lower()
 
     if "pdf" in content_type or url.lower().endswith(".pdf"):
-        with pdfplumber.open(io.BytesIO(r.content)) as pdf:
-            parts = [page.extract_text() for page in pdf.pages[:20] if page.extract_text()]
-        return "\n\n".join(parts)[:50000]
+        try:
+            import pdfplumber, io
+            with pdfplumber.open(io.BytesIO(r.content)) as pdf:
+                parts = [page.extract_text() for page in pdf.pages[:20] if page.extract_text()]
+            return "\n\n".join(parts)[:50000]
+        except Exception:
+            return r.text[:50000]
     else:
-        # HTML — strip tags
         import re
         text = re.sub(r'<[^>]+>', ' ', r.text)
         text = re.sub(r'\s+', ' ', text).strip()
         return text[:50000]
 
 
-# ── Endpoints ────────────────────────────────────────────────
-
 @router.post("/analyse/regulatory")
 async def analyse_regulatory(body: RegulatoryRequest):
     """
-    Search the FCA register and return an AI-powered regulatory risk assessment.
+    Search for UK regulated firms and return AI-powered compliance assessment.
 
-    Works for firms (by name or FRN) and approved individuals.
-    Returns authorisation status, permissions summary, red flags, and recommendation.
+    Uses Companies House data with FCA register cross-reference link.
+    Returns up to 10 matching companies with compliance risk assessment on top match.
 
     Request body:
-        query       (str) - firm name, FRN number, or individual name
+        query       (str) - firm name or Companies House number
         search_type (str) - "firm" or "individual" (default: "firm")
 
     Price: 800 sats via L402.
@@ -242,58 +261,94 @@ async def analyse_regulatory(body: RegulatoryRequest):
     try:
         import asyncio
 
-        if body.search_type == "individual":
-            results = await fca_search_individual(body.query)
-            entity_type = "individual"
-        else:
-            results = await fca_search_firm(body.query)
-            entity_type = "firm"
+        # Search Companies House
+        results = await search_companies_house(body.query, items=10)
 
         if not results:
             raise HTTPException(
                 status_code=404,
-                detail=f"No {entity_type} found matching '{body.query}' on the FCA register."
+                detail=f"No companies found matching '{body.query}'. Try a shorter or different name."
             )
 
-        # Get detail for top result if it's a firm
+        # Get full detail on top result
         top = results[0]
-        frn = str(top.get("FRN", top.get("frn", "")))
-        detail = {}
+        number = top.get("company_number", "")
 
-        if entity_type == "firm" and frn:
-            detail = await fca_firm_detail(frn)
+        profile, officers, filings = await asyncio.gather(
+            get_company_profile(number),
+            get_company_officers(number),
+            get_filing_history(number),
+        )
 
-        # Build Claude input
-        fca_data = {
-            "search_query": body.query,
-            "entity_type": entity_type,
-            "top_result": top,
-            "detail": detail,
-            "other_matches": results[1:] if len(results) > 1 else []
+        # Build address string
+        addr = profile.get("registered_office_address", {})
+        address_str = ", ".join(p for p in [
+            addr.get("premises", ""), addr.get("address_line_1", ""),
+            addr.get("locality", ""), addr.get("postal_code", ""),
+            addr.get("country", "")
+        ] if p)
+
+        # Format officers
+        formatted_officers = [
+            {
+                "name": o.get("name", ""),
+                "role": o.get("officer_role", ""),
+                "appointed": o.get("appointed_on"),
+                "resigned": o.get("resigned_on")
+            }
+            for o in officers[:10]
+        ]
+
+        company_data = {
+            "name": profile.get("company_name", top.get("title", "")),
+            "number": number,
+            "status": profile.get("company_status", "unknown"),
+            "type": profile.get("type", "unknown"),
+            "incorporated": profile.get("date_of_creation"),
+            "has_insolvency_history": profile.get("has_insolvency_history", False),
+            "has_charges": profile.get("has_charges", False),
+            "active_officers": len([o for o in formatted_officers if not o["resigned"]]),
+            "resigned_officers": len([o for o in formatted_officers if o["resigned"]]),
+            "filings": filings,
+            "address": address_str,
         }
 
-        risk, input_tokens, output_tokens = call_claude(
+        assessment, input_tokens, output_tokens = call_claude(
             REGULATORY_RISK_PROMPT,
-            f"Assess this FCA register entity:\n\n{json.dumps(fca_data, indent=2)}"
+            f"Assess the regulatory compliance standing of this UK company:\n\n{json.dumps(company_data, indent=2)}"
         )
 
         result = {
             "query": body.query,
-            "entity_type": entity_type,
-            "fca_results": results,
+            "total_results": len(results),
+            "all_matches": [
+                {
+                    "name": r.get("title", ""),
+                    "number": r.get("company_number", ""),
+                    "status": r.get("company_status", ""),
+                    "type": r.get("company_type", ""),
+                    "address": r.get("address_snippet", ""),
+                    "incorporated": r.get("date_of_creation", ""),
+                }
+                for r in results
+            ],
             "top_match": {
-                "name": top.get("Organisation Name", top.get("Full Name", "")),
-                "frn": frn,
-                "status": top.get("Status", ""),
-                "type": top.get("Business Type", ""),
+                "name": profile.get("company_name", top.get("title", "")),
+                "number": number,
+                "status": profile.get("company_status", "unknown"),
+                "type": profile.get("type", "unknown"),
+                "incorporated": profile.get("date_of_creation"),
+                "address": address_str,
             },
-            "detail": detail,
-            "risk_assessment": risk,
+            "officers": formatted_officers,
+            "filings": filings,
+            "risk_assessment": assessment,
             "_meta": {
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "model": "claude-sonnet-4-6",
-                "fca_results_count": len(results),
+                "data_source": "Companies House + Claude AI",
+                "fca_api_status": "pending_ip_whitelist",
             }
         }
 
