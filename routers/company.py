@@ -459,53 +459,45 @@ async def get_director_other_companies(officer_ids: list) -> list:
                 continue
     return results
 
-RISK_SYSTEM_PROMPT = """You are an elite UK company intelligence analyst used by lawyers, investors, and compliance professionals.
-Your output is always valid JSON — nothing else, no preamble, no markdown fences.
+RISK_SYSTEM_PROMPT = """You are a UK company risk assessment engine.
+Output ONLY a valid JSON object. No preamble, no explanation, no markdown.
+Start your response with { and end with }.
 
-Given comprehensive Companies House data for a UK company, produce a rich structured intelligence report.
-
-Return this exact structure:
+Given Companies House data, return exactly this structure:
 {
-  "overall": "low|medium|high",
+  "overall": "low",
   "score": 3,
-  "flags": ["specific red flags with context — reference actual data"],
-  "positives": ["specific positive indicators with context — reference actual data"],
-  "recommendation": "2-3 sentence plain English recommendation",
-
+  "flags": ["flag 1", "flag 2"],
+  "positives": ["positive 1", "positive 2"],
+  "recommendation": "2-3 sentence recommendation.",
   "risk_narrative": {
-    "key_concerns": ["up to 3 specific concerns with explanation"],
-    "key_strengths": ["up to 3 specific strengths with explanation"],
-    "watch_points": ["up to 3 things to monitor going forward"]
+    "key_concerns": ["concern 1", "concern 2"],
+    "key_strengths": ["strength 1", "strength 2"],
+    "watch_points": ["watch point 1"]
   },
-
   "counterparty_guidance": {
-    "as_supplier": "2 sentences — what a supplier should consider before extending credit or terms",
-    "as_investor": "2 sentences — what an investor should consider before investing",
-    "as_partner": "2 sentences — what a business partner or JV counterparty should consider",
-    "as_customer": "1 sentence — what a customer should consider"
+    "as_supplier": "What a supplier should consider.",
+    "as_investor": "What an investor should consider.",
+    "as_partner": "What a partner should consider.",
+    "as_customer": "What a customer should consider."
   },
-
   "director_assessment": {
-    "board_quality": "strong|adequate|weak|insufficient_data",
-    "tenure_summary": "1 sentence on average director tenure and stability",
-    "notable_patterns": "1 sentence on any notable patterns — rapid turnover, single director, long-serving board etc",
-    "diversity_note": "1 sentence on board composition observable from the data"
+    "board_quality": "strong",
+    "tenure_summary": "One sentence on tenure.",
+    "notable_patterns": "One sentence on patterns.",
+    "diversity_note": "One sentence on composition."
   },
-
   "sector_benchmark": {
-    "sector": "plain English sector name",
-    "company_size_estimate": "micro|small|medium|large|very_large",
-    "filing_compliance_vs_sector": "above_average|average|below_average|insufficient_data",
-    "charge_profile_vs_sector": "typical|high|low|none",
-    "benchmark_comment": "2 sentences comparing this company to typical peers in its sector and size band"
+    "sector": "Financial services",
+    "company_size_estimate": "large",
+    "filing_compliance_vs_sector": "above_average",
+    "charge_profile_vs_sector": "typical",
+    "benchmark_comment": "Two sentences comparing to peers."
   },
-
-  "industry_context": "2-3 sentences of relevant industry context — regulatory environment, typical risks for this sector, any sector-specific flags to be aware of"
+  "industry_context": "2-3 sentences on industry context."
 }
 
-Score 1-10 where 1=very low risk, 10=very high risk.
-Be specific — reference actual data points (company age, director names, charge holders, SIC codes, years trading).
-Never include text outside the JSON object."""
+overall must be low/medium/high. score 1-10. Start with {, end with }."""
 
 
 def call_claude_risk(company_data: dict) -> tuple:
