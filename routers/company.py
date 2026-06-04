@@ -632,6 +632,39 @@ Use millions (m) or billions (bn) formatting. Return null for any figure not fou
     except Exception as e:
         return {"available": False, "reason": str(e)[:100]}
 
+
+@router.get("/search/companies")
+async def search_companies(q: str, limit: int = 10):
+    """
+    Search Companies House for companies matching a query.
+    Returns up to 10 results with name, number, status, type, address.
+    Free — no payment required.
+    """
+    if not q or not q.strip():
+        raise HTTPException(status_code=400, detail="q parameter required")
+
+    results = await search_companies_house(q.strip(), items=min(limit, 10))
+
+    if not results:
+        return {"items": [], "total": 0, "query": q}
+
+    return {
+        "items": [
+            {
+                "title": r.get("title", ""),
+                "company_number": r.get("company_number", ""),
+                "company_status": r.get("company_status", ""),
+                "company_type": r.get("company_type", ""),
+                "address_snippet": r.get("address_snippet", ""),
+                "date_of_creation": r.get("date_of_creation", ""),
+            }
+            for r in results
+        ],
+        "total": len(results),
+        "query": q,
+    }
+
+
 @router.post("/analyse/company")
 async def analyse_company(body: CompanyRequest):
     """
