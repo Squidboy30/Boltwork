@@ -47,6 +47,10 @@ _PRICE_MAP = {
     "/memory/store":       10,
     "/memory/retrieve":     5,
     "/workflow/run":     1000,
+    "/search/companies":    0,
+    "/analyse/company":  1000,
+    "/analyse/regulatory": 800,
+    "/analyse/document":   600,
 }
 
 def _ensure_counter_table():
