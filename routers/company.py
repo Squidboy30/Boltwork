@@ -459,21 +459,52 @@ async def get_director_other_companies(officer_ids: list) -> list:
                 continue
     return results
 
-RISK_SYSTEM_PROMPT = """You are a UK company risk assessment engine. \
+RISK_SYSTEM_PROMPT = """You are an elite UK company intelligence analyst used by lawyers, investors, and compliance professionals.
 Your output is always valid JSON — nothing else, no preamble, no markdown fences.
 
-Given Companies House data for a UK company, produce a structured risk assessment.
+Given comprehensive Companies House data for a UK company, produce a rich structured intelligence report.
 
 Return this exact structure:
 {
   "overall": "low|medium|high",
   "score": 3,
-  "flags": ["red flags — e.g. late filings, dissolved status, insolvency history"],
-  "positives": ["positive indicators — e.g. long trading history, filed on time"],
-  "recommendation": "2-3 sentence plain English recommendation"
+  "flags": ["specific red flags with context — reference actual data"],
+  "positives": ["specific positive indicators with context — reference actual data"],
+  "recommendation": "2-3 sentence plain English recommendation",
+
+  "risk_narrative": {
+    "key_concerns": ["up to 3 specific concerns with explanation"],
+    "key_strengths": ["up to 3 specific strengths with explanation"],
+    "watch_points": ["up to 3 things to monitor going forward"]
+  },
+
+  "counterparty_guidance": {
+    "as_supplier": "2 sentences — what a supplier should consider before extending credit or terms",
+    "as_investor": "2 sentences — what an investor should consider before investing",
+    "as_partner": "2 sentences — what a business partner or JV counterparty should consider",
+    "as_customer": "1 sentence — what a customer should consider"
+  },
+
+  "director_assessment": {
+    "board_quality": "strong|adequate|weak|insufficient_data",
+    "tenure_summary": "1 sentence on average director tenure and stability",
+    "notable_patterns": "1 sentence on any notable patterns — rapid turnover, single director, long-serving board etc",
+    "diversity_note": "1 sentence on board composition observable from the data"
+  },
+
+  "sector_benchmark": {
+    "sector": "plain English sector name",
+    "company_size_estimate": "micro|small|medium|large|very_large",
+    "filing_compliance_vs_sector": "above_average|average|below_average|insufficient_data",
+    "charge_profile_vs_sector": "typical|high|low|none",
+    "benchmark_comment": "2 sentences comparing this company to typical peers in its sector and size band"
+  },
+
+  "industry_context": "2-3 sentences of relevant industry context — regulatory environment, typical risks for this sector, any sector-specific flags to be aware of"
 }
 
-Score is 1-10 where 1=very low risk, 10=very high risk.
+Score 1-10 where 1=very low risk, 10=very high risk.
+Be specific — reference actual data points (company age, director names, charge holders, SIC codes, years trading).
 Never include text outside the JSON object."""
 
 
@@ -738,6 +769,9 @@ async def analyse_company(body: CompanyRequest):
             "confirmation_statement_overdue": conf_overdue,
             "pscs_count": len(pscs),
             "director_multi_company_count": len(related_companies),
+            "gazette_notices_summary": [n.get("title","") for n in gazette_notices[:2]],
+            "trademark_count": len(trademark_results),
+            "recent_resignations_12mo": len(recent_resignations),
             "filings": filings,
         }
 
