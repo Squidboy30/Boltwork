@@ -501,6 +501,106 @@ def call_claude_risk(company_data: dict) -> tuple:
     return result, message.usage.input_tokens, message.usage.output_tokens
 
 
+
+async def validate_vat(company_name: str, country_code: str = "GB") -> dict:
+    """Check VAT registration via HMRC VIES API."""
+    try:
+        # Search Companies House for VAT number via company name
+        # VIES API: check.vat.co.uk (free UK VAT checker)
+        import urllib.parse
+        query = urllib.parse.quote(company_name[:50])
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"https://api.vatcomply.com/vat?q={query}&country={country_code}",
+                headers={"User-Agent": "Boltwork/2.0"}
+            )
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        pass
+    return {}
+
+
+async def search_trademarks(company_name: str) -> list:
+    """Search UK IPO trademark register."""
+    try:
+        # UK IPO public search API
+        words = company_name.split()[:2]
+        query = "+".join(words)
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                f"https://trademarks.ipo.gov.uk/ipo-tmcase/page/Results/1/{query}",
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            )
+            if r.status_code == 200:
+                try:
+                    data = r.json()
+                    marks = data.get("tradeMarks", data.get("results", []))
+                    return [
+                        {
+                            "mark": m.get("tradeMarkName", m.get("mark", "")),
+                            "number": m.get("applicationNumber", m.get("number", "")),
+                            "status": m.get("tradeMarkStatus", m.get("status", "")),
+                            "class": m.get("goodsAndServicesClass", ""),
+                            "filed": m.get("applicationDate", ""),
+                        }
+                        for m in marks[:5]
+                    ]
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return []
+
+
+async def fetch_accounts_summary(pdf_url: str) -> dict:
+    """Fetch and extract key figures from filed accounts PDF."""
+    if not pdf_url:
+        return {}
+    try:
+        import pdfplumber, io, re
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            r = await client.get(
+                pdf_url,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    **(_ch_headers() if os.environ.get("COMPANIES_HOUSE_API_KEY") else {})
+                }
+            )
+            if r.status_code != 200:
+                return {}
+
+        with pdfplumber.open(io.BytesIO(r.content)) as pdf:
+            text = ""
+            for page in pdf.pages[:10]:
+                t = page.extract_text()
+                if t:
+                    text += t + "\n"
+
+        if not text.strip():
+            return {"available": False, "reason": "no_text_extracted"}
+
+        # Extract key figures with Claude
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            system="""Extract key financial figures from UK company accounts.
+Return ONLY valid JSON, no other text:
+{"turnover": "£X.Xm or null", "net_assets": "£X.Xm or null", "employees": number_or_null, "profit_loss": "£X.Xm or null", "total_assets": "£X.Xm or null", "year_end": "YYYY-MM-DD or null", "available": true}
+Use millions (m) or billions (bn) formatting. Return null for any figure not found.""",
+            messages=[{"role": "user", "content": f"Extract financial figures:\n\n{text[:8000]}"}]
+        )
+        raw = message.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = "\n".join(l for l in raw.splitlines() if not l.startswith("```")).strip()
+        result = json.loads(raw)
+        result["available"] = True
+        return result
+    except Exception as e:
+        return {"available": False, "reason": str(e)[:100]}
+
 @router.post("/analyse/company")
 async def analyse_company(body: CompanyRequest):
     """
@@ -548,11 +648,18 @@ async def analyse_company(body: CompanyRequest):
 
         # Additional enrichment
         company_display_name = profile.get("company_name", body.company_name or "")
-        insolvency_detail, address_history, gazette_notices = await asyncio.gather(
+        insolvency_detail, address_history, gazette_notices, trademark_results = await asyncio.gather(
             get_insolvency(number),
             get_registered_office_history(number),
             get_gazette_notices(company_display_name, number),
+            search_trademarks(company_display_name),
         )
+
+        # Accounts PDF parsing (async, best effort)
+        accounts_pdf_url = filings.get("latest_document_url", "")
+        accounts_financials = {}
+        if body.include_accounts and accounts_pdf_url:
+            accounts_financials = await fetch_accounts_summary(accounts_pdf_url)
 
         # Director cross-reference — extract officer IDs from links
         active_directors = [d for d in directors if not d.get("resigned_on")]
@@ -682,15 +789,11 @@ async def analyse_company(body: CompanyRequest):
             "charges": charges,
             "filings": filings,
             "accounts_summary": {
-                "available": bool(filings.get("latest_document_url")),
+                "available": bool(accounts_financials.get("available")),
                 "pdf_url": filings.get("latest_document_url"),
-                "summary": None,
-                "key_figures": {
-                    "turnover": None,
-                    "net_assets": None,
-                    "employees": None,
-                }
+                "key_figures": accounts_financials,
             },
+            "trademarks": trademark_results,
             "risk_assessment": risk,
             "insolvency_detail": insolvency_detail,
             "gazette_notices": gazette_notices,
