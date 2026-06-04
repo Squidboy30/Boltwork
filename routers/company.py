@@ -505,19 +505,23 @@ def call_claude_risk(company_data: dict) -> tuple:
         "Assess the risk of this UK company based on the following data:\n\n"
         + json.dumps(company_data, indent=2)
     )
+    # Use assistant pre-fill to force JSON output
     message = get_client().messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1000,
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2000,
         system=RISK_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": "{"},
+        ]
     )
-    text = message.content[0].text.strip()
-    if text.startswith("```"):
-        text = "\n".join(
-            l for l in text.splitlines() if not l.startswith("```")
-        ).strip()
+    raw = "{" + message.content[0].text.strip()
+    # Find last closing brace
+    end_idx = raw.rfind("}")
+    if end_idx != -1:
+        raw = raw[:end_idx+1]
     try:
-        result = json.loads(text)
+        result = json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(status_code=500,
                             detail="Model returned malformed JSON. Please retry.")
