@@ -437,6 +437,42 @@ Boltwork is discoverable by any agent that supports the L402 protocol:
 """
 
 
+
+
+@app.get("/setup")
+def setup_guide():
+    """Wallet setup guide for new users hitting the L402 paywall."""
+    return {
+        "message": "You need a Lightning wallet to use Boltwork paid endpoints.",
+        "trial": {
+            "description": "Try Boltwork free — no wallet needed",
+            "endpoints": [
+                {"path": "/trial/review", "description": "Code review (500 char limit, 5/hr)"},
+                {"path": "/trial/summarise", "description": "Text summarisation (1000 char limit, 5/hr)"},
+            ]
+        },
+        "wallet_setup": {
+            "recommended": {
+                "name": "Alby (NWC)",
+                "url": "https://nwc.getalby.com",
+                "steps": [
+                    "Go to nwc.getalby.com and create a free account",
+                    "Create a budget (e.g. 5000 sats/month)",
+                    "Copy the NWC connection string",
+                    "Set NWC_CONNECTION_STRING env var in your boltwork-mcp config"
+                ],
+                "time": "2 minutes"
+            },
+            "alternatives": [
+                {"name": "LNbits", "url": "https://lnbits.com", "env": "LNBITS_URL + LNBITS_API_KEY"},
+                {"name": "Strike", "url": "https://strike.me", "env": "STRIKE_API_KEY"},
+                {"name": "Phoenixd", "url": "https://phoenix.acinq.co/server", "env": "PHOENIXD_URL + PHOENIXD_PASSWORD"},
+            ]
+        },
+        "mcp_package": "pip install boltwork-mcp[nwc]",
+        "docs": "https://github.com/Squidboy30/Boltwork/blob/main/README.md",
+    }
+
 @app.get("/.well-known/l402.json")
 def l402_well_known():
     return {
@@ -550,6 +586,7 @@ def l402_well_known():
             },
         ],
         "payment": {"protocol": "L402", "network": "lightning"},
+        "setup_url": f"{SERVICE_URL}/setup",
         "contact": os.environ.get("CONTACT_EMAIL", ""),
         "provider": "Cracked Minds",
         "provider_url": "https://crackedminds.co.uk",
