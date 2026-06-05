@@ -18,6 +18,7 @@ from routers.memory import router as memory_router
 from routers.workflow import router as workflow_router
 from routers.suggest import router as suggest_router
 from routers.gateway import router as gateway_router
+from routers.executor import router as executor_router
 from routers.admin import router as admin_router
 from routers.company import router as company_router
 from routers.regulatory import router as regulatory_router
@@ -201,6 +202,7 @@ app.include_router(memory_router)
 app.include_router(workflow_router)
 app.include_router(suggest_router)
 app.include_router(gateway_router)
+app.include_router(executor_router)
 app.include_router(admin_router)
 app.include_router(company_router)
 app.include_router(regulatory_router)
