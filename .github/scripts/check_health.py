@@ -228,7 +228,7 @@ def run_checks():
     api_ok = any(r["ok"] for r in results if r["name"] == "Boltwork API")
     # Lightning gates passing = service operational
     all_ok = lightning_ok
-    return now, results, all_ok, usage
+    return now, results, all_ok, usage, lightning_results, lightning_ok
 
 
 def build_email(now, results, all_ok, usage):
@@ -389,7 +389,7 @@ def send_email(plain, html, subject):
 
 if __name__ == "__main__":
     print("Running Boltwork health checks...")
-    now, results, all_ok, usage = run_checks()
+    now, results, all_ok, usage, lightning_results, lightning_ok = run_checks()
     for r in results:
         icon = "✓" if r["ok"] else "✗"
         print(f"  {icon} {r['name']}: HTTP {r['status']} — {r['detail'][:80]}")
@@ -399,4 +399,5 @@ if __name__ == "__main__":
     print(f"\nSending: {subject}")
     send_email(plain, html, subject)
     print("Email sent.")
+    print(f"DEBUG: lightning_ok={lightning_ok}, all_ok={all_ok}, lightning_count={len(lightning_results)}")
     sys.exit(0 if all_ok else 1)
