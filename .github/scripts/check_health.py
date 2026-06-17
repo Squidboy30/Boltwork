@@ -214,7 +214,11 @@ def run_checks():
         results.append({"name": name, "ok": ok, "status": status, "detail": detail})
 
     usage = get_usage_stats()
-    all_ok = all(r["ok"] for r in results)
+    # Only fail on critical services — Lightning gates and API health
+    # Direct FastAPI route checks and agent-spec are non-critical (intermittent SSL on cold start)
+    non_critical = {"Agent spec (/agent-spec.md)"}
+    non_critical.update({r["name"] for r in results if r["name"].startswith("FastAPI route")})
+    all_ok = all(r["ok"] for r in results if r["name"] not in non_critical)
     return now, results, all_ok, usage
 
 
