@@ -137,12 +137,10 @@ def get_usage_stats():
 
 
 def run_checks():
+    import time
     now = datetime.now(timezone.utc)
     results = []
-
-    # Warmup — wake the Fly.io machine before checks (auto_stop_machines = stop)
-    import time
-    print("Warming up Boltwork API...")
+    # Warmup — wake Fly.io machine (auto_stop_machines = stop)
     for _ in range(3):
         try:
             urllib.request.urlopen(f"{BOLTWORK_API}/health", timeout=10)
@@ -228,7 +226,7 @@ def run_checks():
     lightning_results = [r for r in results if r["name"].startswith("Lightning gate")]
     lightning_ok = all(r["ok"] for r in lightning_results) if lightning_results else False
     api_ok = any(r["ok"] for r in results if r["name"] == "Boltwork API")
-    # Lightning gates passing = service operational (API may cold-start)
+    # Lightning gates passing = service operational
     all_ok = lightning_ok
     return now, results, all_ok, usage
 
