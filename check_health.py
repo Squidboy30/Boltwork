@@ -164,10 +164,10 @@ def run_checks():
     })
 
     # 2. Agent discovery — re-fetch full content to count endpoints
-    ok, status, detail = check("L402 discovery", f"{BOLTWORK_API}/.well-known/l402.json", expected_status=200)
+    ok, status, detail = check("L402 discovery", f"{BOLTWORK_L402}/.well-known/l402.json", expected_status=200)
     endpoint_count = 0
     try:
-        req = urllib.request.Request(f"{BOLTWORK_API}/.well-known/l402.json")
+        req = urllib.request.Request(f"{BOLTWORK_L402}/.well-known/l402.json")
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             full_data = json.loads(r.read())
             endpoint_count = len(full_data.get("pricing", []))
@@ -180,23 +180,23 @@ def run_checks():
     })
 
     # 3. Agent spec
-    ok, status, detail = check("Agent spec", f"{BOLTWORK_API}/agent-spec.md", expected_status=200)
+    ok, status, detail = check("Agent spec", f"{BOLTWORK_L402}/agent-spec.md", expected_status=200)
     results.append({
         "name": "Agent spec (/agent-spec.md)",
         "ok": ok, "status": status,
         "detail": "Accessible" if ok else detail
     })
 
-    # 4. FastAPI route checks — hit public L402 gateway, expect 402 Payment Required
+    # 4. FastAPI route checks — empty body triggers 422 if route exists
     routes = [
-        ("FastAPI route — /summarise/url",      f"{BOLTWORK_L402}/summarise/url",      '{}', [402, 422]),
-        ("FastAPI route — /review/code",        f"{BOLTWORK_L402}/review/code",        '{}', [402, 422]),
-        ("FastAPI route — /extract/webpage",    f"{BOLTWORK_L402}/extract/webpage",    '{}', [402, 422]),
-        ("FastAPI route — /extract/data",       f"{BOLTWORK_L402}/extract/data",       '{}', [402, 422]),
-        ("FastAPI route — /translate",          f"{BOLTWORK_L402}/translate",          '{}', [402, 422]),
-        ("FastAPI route — /analyse/tables",     f"{BOLTWORK_L402}/analyse/tables",     '{}', [402, 422]),
-        ("FastAPI route — /analyse/compare",    f"{BOLTWORK_L402}/analyse/compare",    '{}', [402, 422]),
-        ("FastAPI route — /analyse/explain",    f"{BOLTWORK_L402}/analyse/explain",    '{}', [402, 422]),
+        ("FastAPI route — /summarise/url",      f"{BOLTWORK_API}/summarise/url",      '{}', [422]),
+        ("FastAPI route — /review/code",        f"{BOLTWORK_API}/review/code",        '{}', [422]),
+        ("FastAPI route — /extract/webpage",    f"{BOLTWORK_API}/extract/webpage",    '{}', [422]),
+        ("FastAPI route — /extract/data",       f"{BOLTWORK_API}/extract/data",       '{}', [422]),
+        ("FastAPI route — /translate",          f"{BOLTWORK_API}/translate",          '{}', [422]),
+        ("FastAPI route — /analyse/tables",     f"{BOLTWORK_API}/analyse/tables",     '{}', [422]),
+        ("FastAPI route — /analyse/compare",    f"{BOLTWORK_API}/analyse/compare",    '{}', [422]),
+        ("FastAPI route — /analyse/explain",    f"{BOLTWORK_API}/analyse/explain",    '{}', [422]),
         ("FastAPI route — /analyse/image",      f"{BOLTWORK_API}/analyse/image",      '{}', [400, 422]),
         ("FastAPI route — /analyse/contract",   f"{BOLTWORK_API}/analyse/contract",   '{}', [422]),
         ("FastAPI route — /trial/review",       f"{BOLTWORK_API}/trial/review",       '{}', [422]),
