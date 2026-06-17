@@ -21,6 +21,7 @@ from routers.gateway import router as gateway_router
 from routers.executor import router as executor_router
 from routers.admin import router as admin_router
 from routers.company import router as company_router
+from routers.credits import router as credits_router
 from routers.regulatory import router as regulatory_router
 
 
@@ -205,6 +206,7 @@ app.include_router(gateway_router)
 app.include_router(executor_router)
 app.include_router(admin_router)
 app.include_router(company_router)
+app.include_router(credits_router)
 app.include_router(regulatory_router)
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
