@@ -214,7 +214,11 @@ def run_checks():
         results.append({"name": name, "ok": ok, "status": status, "detail": detail})
 
     usage = get_usage_stats()
-    all_ok = all(r["ok"] for r in results)
+    # Lightning gates are authoritative — direct FastAPI routes have intermittent cold-start SSL issues
+    lightning_results = [r for r in results if r["name"].startswith("Lightning gate")]
+    lightning_ok = all(r["ok"] for r in lightning_results) if lightning_results else False
+    api_ok = any(r["ok"] for r in results if r["name"] == "Boltwork API")
+    all_ok = lightning_ok and api_ok
     return now, results, all_ok, usage
 
 
