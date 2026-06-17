@@ -1,10 +1,7 @@
 name: Parsebit Daily Health Check
 on:
   schedule:
-    # 8:00am UK time (UTC+1 BST / UTC+0 GMT)
-    # Run at 7:00 UTC which covers both BST and GMT
     - cron: '0 7 * * *'
-  # Allow manual trigger from GitHub UI
   workflow_dispatch:
 jobs:
   health-check:
@@ -22,12 +19,6 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: python .github/scripts/check_health.py
-        # Note: exits with code 1 if any check fails, but we always send the email
         continue-on-error: true
-      - name: Mark workflow as failed if checks failed
-        if: failure()
-        run: |
-          echo "One or more health checks failed — see email for details"
-          exit 1
- 
