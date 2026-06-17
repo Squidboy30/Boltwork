@@ -24,7 +24,7 @@ BOLTWORK_API  = "https://parsebit.fly.dev"
 BOLTWORK_L402 = "https://parsebit-lnd.fly.dev"
 FLY_APP_NAME  = "parsebit"
 
-TIMEOUT = 30
+TIMEOUT = 15
 
 
 def check(label, url, method="GET", body=None, headers=None, expected_status=None):
@@ -137,16 +137,8 @@ def get_usage_stats():
 
 
 def run_checks():
-    import time
     now = datetime.now(timezone.utc)
     results = []
-    # Warmup — wake Fly.io machine (auto_stop_machines = stop)
-    for _ in range(3):
-        try:
-            urllib.request.urlopen(f"{BOLTWORK_API}/health", timeout=10)
-            break
-        except Exception:
-            time.sleep(5)
 
     # 1. API health
     ok, status, detail = check("Health", f"{BOLTWORK_API}/health", expected_status=200)
@@ -222,13 +214,8 @@ def run_checks():
         results.append({"name": name, "ok": ok, "status": status, "detail": detail})
 
     usage = get_usage_stats()
-    # Lightning gates are authoritative — direct FastAPI routes have intermittent cold-start SSL issues
-    lightning_results = [r for r in results if r["name"].startswith("Lightning gate")]
-    lightning_ok = all(r["ok"] for r in lightning_results) if lightning_results else False
-    api_ok = any(r["ok"] for r in results if r["name"] == "Boltwork API")
-    # Lightning gates passing = service operational
-    all_ok = lightning_ok
-    return now, results, all_ok, usage, lightning_results, lightning_ok
+    all_ok = all(r["ok"] for r in results)
+    return now, results, all_ok, usage
 
 
 def build_email(now, results, all_ok, usage):
@@ -389,7 +376,7 @@ def send_email(plain, html, subject):
 
 if __name__ == "__main__":
     print("Running Boltwork health checks...")
-    now, results, all_ok, usage, lightning_results, lightning_ok = run_checks()
+    now, results, all_ok, usage = run_checks()
     for r in results:
         icon = "✓" if r["ok"] else "✗"
         print(f"  {icon} {r['name']}: HTTP {r['status']} — {r['detail'][:80]}")
@@ -399,5 +386,4 @@ if __name__ == "__main__":
     print(f"\nSending: {subject}")
     send_email(plain, html, subject)
     print("Email sent.")
-    print(f"DEBUG: lightning_ok={lightning_ok}, all_ok={all_ok}, lightning_count={len(lightning_results)}")
     sys.exit(0 if all_ok else 1)
